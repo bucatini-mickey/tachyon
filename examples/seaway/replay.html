@@ -1,0 +1,151 @@
+<title>Seaway Action</title>
+<style>
+/* Layout: one terminal. The recorded screen, then a line of bracketed
+   commands, then the log scrolling underneath, all in the engine's own font.
+   Committed dark look: a terminal stays a terminal in either theme. */
+:root {
+  --black: #000000;
+  --text: #c8c8c8;
+  --dim: #7c7c84;
+  --amber: #e8d296;
+  --hot: #ff963c;
+  --rule: #303038;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+html, body { background: var(--black); color: var(--text); }
+body { font: 14px/1.0 var(--mono); }
+.term { padding-inline: 16px; padding-block: 12px 24px; display: grid; gap: 10px; justify-items: start; }
+.line { margin: 0; line-height: 1.35; max-width: 100%; }
+.amber { color: var(--amber); }
+.dim { color: var(--dim); }
+.screen { margin: 0; max-width: 100%; overflow-x: auto; font: 14px/1.0 var(--mono); white-space: pre; }
+.screen span { display: inline; }
+.cmds { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; line-height: 1.35; }
+.cmds button { font: inherit; color: var(--amber); background: none; border: 0; padding: 0; cursor: pointer; }
+.cmds button:hover { color: var(--black); background: var(--amber); }
+.cmds button:focus-visible { outline: 1px solid var(--amber); outline-offset: 1px; }
+.cmds input[type=range] { width: min(320px, 60vw); accent-color: var(--amber); }
+.cmds input:focus-visible { outline: 1px solid var(--amber); }
+.num { font-variant-numeric: tabular-nums; }
+.log { margin: 0; padding: 6px 0 0; border-top: 1px solid var(--rule); width: min(100%, 110ch); height: 13.5em; overflow-y: auto; line-height: 1.35; white-space: pre-wrap; color: var(--amber); }
+.log .when { color: var(--dim); }
+.log .hot { color: var(--hot); }
+.small .screen { font-size: 9px; }
+@media (max-width: 700px) { .screen { font-size: 6px; } .small .screen { font-size: 6px; } }
+</style>
+
+<div class="term" id="term">
+  <p class="line"><span class="amber">SEAWAY ACTION</span> <span class="dim">- recorded from the Tachyon engine; two brigs, both captains the engine's own</span></p>
+  <p class="line dim" id="summary"></p>
+  <pre class="screen" id="screen" aria-label="Recorded terminal frames of the action"></pre>
+  <div class="cmds">
+    <button id="play" type="button">[ pause ]</button>
+    <button id="back" type="button" aria-label="Step back one frame">[ &lt; ]</button>
+    <button id="fwd" type="button" aria-label="Step forward one frame">[ &gt; ]</button>
+    <input id="scrub" type="range" min="0" value="0" aria-label="Frame">
+    <span class="num" id="clock"></span>
+    <span class="num dim" id="frameno"></span>
+    <button id="speed" type="button">[ speed 2x ]</button>
+    <button id="size" type="button">[ smaller ]</button>
+  </div>
+  <p class="line dim">deck of Dauntless | hold of Vigilante (sea coming in) | chart and log.  @ hand  = gun  O mast  * flash or shot  o splash  # strike  % man down  grey smoke</p>
+  <div class="log" id="log" aria-live="polite"></div>
+</div>
+
+<script>
+const W = {{W}}, H = {{H}};
+const SUMMARY = {{SUMMARY}};
+const PAL = [{{PALETTE}}];
+const FRAMES = [{{FRAMES}}];
+
+const screen = document.getElementById("screen");
+const scrub = document.getElementById("scrub");
+const playBtn = document.getElementById("play");
+const speedBtn = document.getElementById("speed");
+const clock = document.getElementById("clock");
+const frameno = document.getElementById("frameno");
+const logEl = document.getElementById("log");
+document.getElementById("summary").textContent = SUMMARY;
+scrub.max = FRAMES.length - 1;
+
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function render(i) {
+  const f = FRAMES[i];
+  let html = "";
+  for (const row of f.rows) {
+    for (let k = 0; k < row.length; k += 3) {
+      html += '<span style="color:' + PAL[row[k]] + ";background:" + PAL[row[k + 1]] + '">' + esc(row[k + 2]) + "</span>";
+    }
+    html += "\n";
+  }
+  screen.innerHTML = html;
+  clock.textContent = f.t;
+  frameno.textContent = (i + 1) + "/" + FRAMES.length;
+  scrub.value = i;
+}
+
+let shown = -1;
+function showLog(i) {
+  if (i < shown) { logEl.textContent = ""; shown = -1; }
+  for (let k = shown + 1; k <= i; k++) {
+    for (const line of FRAMES[k].log) {
+      const when = document.createElement("span");
+      when.className = "when";
+      when.textContent = FRAMES[k].t.replace("Day 1, ", "") + "  ";
+      const what = document.createElement("span");
+      what.textContent = line + "\n";
+      if (/struck|holed|down|going/.test(line)) what.className = "hot";
+      logEl.append(when, what);
+    }
+  }
+  shown = i;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+const SPEEDS = [4, 8, 16, 30];
+let speed = 1, i = 0, last = 0;
+let playing = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function go(n) {
+  i = Math.max(0, Math.min(FRAMES.length - 1, n));
+  render(i);
+  showLog(i);
+}
+function setPlaying(p) {
+  playing = p;
+  playBtn.textContent = p ? "[ pause ]" : "[ play ]";
+}
+function loop(t) {
+  if (playing && t - last >= 1000 / SPEEDS[speed]) {
+    last = t;
+    if (i >= FRAMES.length - 1) setPlaying(false); else go(i + 1);
+  }
+  requestAnimationFrame(loop);
+}
+
+playBtn.addEventListener("click", () => {
+  if (!playing && i >= FRAMES.length - 1) go(0);
+  setPlaying(!playing);
+});
+document.getElementById("back").addEventListener("click", () => { setPlaying(false); go(i - 1); });
+document.getElementById("fwd").addEventListener("click", () => { setPlaying(false); go(i + 1); });
+scrub.addEventListener("input", () => { setPlaying(false); go(Number(scrub.value)); });
+speedBtn.addEventListener("click", () => {
+  speed = (speed + 1) % SPEEDS.length;
+  speedBtn.textContent = "[ speed " + [1, 2, 4, 8][speed] + "x ]";
+});
+document.getElementById("size").addEventListener("click", (e) => {
+  const small = document.getElementById("term").classList.toggle("small");
+  e.currentTarget.textContent = small ? "[ larger ]" : "[ smaller ]";
+});
+document.addEventListener("keydown", (e) => {
+  if (e.target.closest("input")) return;
+  if (e.key === " ") { e.preventDefault(); setPlaying(!playing); }
+  else if (e.key === "ArrowRight") { setPlaying(false); go(i + 1); }
+  else if (e.key === "ArrowLeft") { setPlaying(false); go(i - 1); }
+});
+
+setPlaying(playing);
+go(0);
+requestAnimationFrame(loop);
+</script>
