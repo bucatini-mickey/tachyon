@@ -1,15 +1,18 @@
-//! The Forge: Tachyon's workshop for making things, for any game.
+//! The Crucible: Tachyon's workshop for making things, for any game.
 //!
-//! A project is a folder under `forge/`: a library of materials and kinds
+//! A project is a folder under `crucible/`: a library of materials and kinds
 //! (what things are made of, and the things themselves: a glyph and colours
 //! each, and tags), and parts: pieces built cell by cell over several levels,
 //! with sockets where they join other parts (a castle wall to a tower, a deck
 //! to a hull), for games and procedural generation to put together.
 //!
-//!     cargo run --release --example forge                 (project "default")
-//!     cargo run --release --example forge -- broadside    (or any project)
+//!     cargo run --release --example crucible                 (project "default")
+//!     cargo run --release --example crucible -- broadside    (or any project)
 //!
-//! Parts save as `forge/<project>/parts/<name>.tpart`: a Tachyon blueprint
+//! Art saves as `crucible/<project>/art/<name>.tart`: the glyphs, then their
+//! colours as a small palette, all plain text.
+//!
+//! Parts save as `crucible/<project>/parts/<name>.tpart`: a Tachyon blueprint
 //! (any game can stamp it) with its sockets after the `end` line.
 //!
 //! Keys (Part mode):  arrows move  Space paint  Del clear (keep)
@@ -18,6 +21,9 @@
 //!   PgUp PgDn  level     + -  add or remove a top level
 //!   s  socket here (again to turn it, x to remove)     Ctrl+S save
 //!   Ctrl+N new part  Ctrl+O open part     Tab: Library mode     Esc: quit
+//! Keys (Art mode, for logos, title art, signs): arrows move  Space paint  Del clear
+//!   g then a key: the brush glyph   c C ink colour   v V paper colour
+//!   Enter: type text at the cursor (Enter again to stop)   ^S save ^N new ^O open
 //! Keys (Library mode): up down choose   m new material  k new kind
 //!   g then a key: glyph (Shift: the floor glyph)   1-6 colour (Ctrl: background)
 //!   r rename   Del remove   Ctrl+S save   Tab: back to the part
@@ -183,6 +189,98 @@ impl Part {
 enum Mode {
     Part,
     Library,
+    Art,
+}
+
+// ---- art: glyph pictures (logos, title art, signs) ------------------------------------------------
+
+/// The art palette: night black first, then inks.
+const PALETTE: [Rgb; 16] = [
+    Rgb(0, 0, 0), Rgb(222, 214, 196), Rgb(120, 112, 100), Rgb(60, 56, 50),
+    Rgb(220, 180, 90), Rgb(200, 120, 50), Rgb(220, 90, 70), Rgb(150, 40, 40),
+    Rgb(120, 190, 90), Rgb(50, 110, 60), Rgb(110, 170, 220), Rgb(50, 80, 150),
+    Rgb(180, 120, 200), Rgb(110, 200, 190), Rgb(170, 130, 80), Rgb(255, 255, 255),
+];
+
+struct Art {
+    name: String,
+    w: i32,
+    h: i32,
+    cells: Vec<Cell>,
+}
+
+impl Art {
+    fn new(name: &str, w: i32, h: i32) -> Art {
+        Art { name: name.into(), w, h, cells: vec![Cell::new(' ', PALETTE[1], PALETTE[0]); (w * h) as usize] }
+    }
+    fn text(&self) -> String {
+        // Every colour used gets a key; then the glyphs, the inks and the papers, a row a line.
+        let keys: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".chars().collect();
+        let mut cols: Vec<Rgb> = Vec::new();
+        for c in &self.cells {
+            for x in [c.fg, c.bg] {
+                if !cols.contains(&x) && cols.len() < keys.len() {
+                    cols.push(x);
+                }
+            }
+        }
+        let key = |x: Rgb| keys[cols.iter().position(|c| *c == x).unwrap_or(0)];
+        let mut s = format!("tachyon-art 1\nname {}\nsize {} {}\n", self.name, self.w, self.h);
+        for (i, c) in cols.iter().enumerate() {
+            s += &format!("color {} {} {} {}\n", keys[i], c.0, c.1, c.2);
+        }
+        for (title, f) in [("glyphs", 0), ("ink", 1), ("paper", 2)] {
+            s += title;
+            s.push('\n');
+            for y in 0..self.h {
+                for x in 0..self.w {
+                    let c = self.cells[(y * self.w + x) as usize];
+                    s.push(match f { 0 => c.ch, 1 => key(c.fg), _ => key(c.bg) });
+                }
+                s.push('\n');
+            }
+        }
+        s + "end\n"
+    }
+    fn from_text(text: &str) -> Result<Art, String> {
+        let mut lines = text.lines();
+        if !lines.next().unwrap_or("").starts_with("tachyon-art") {
+            return Err("not Tachyon art".into());
+        }
+        let (mut name, mut w, mut h) = (String::from("art"), 0, 0);
+        let mut cols: Vec<(char, Rgb)> = Vec::new();
+        let mut grids: Vec<Vec<Vec<char>>> = Vec::new();
+        while let Some(l) = lines.next() {
+            let (word, rest) = l.split_once(' ').unwrap_or((l, ""));
+            match word {
+                "name" => name = rest.into(),
+                "size" => {
+                    let v: Vec<i32> = rest.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                    (w, h) = (*v.first().unwrap_or(&0), *v.get(1).unwrap_or(&0));
+                }
+                "color" => {
+                    let mut it = rest.splitn(2, ' ');
+                    let k = it.next().and_then(|k| k.chars().next()).unwrap_or('a');
+                    cols.push((k, rgb(it.next().unwrap_or("")).unwrap_or(INK)));
+                }
+                "glyphs" | "ink" | "paper" => grids.push((0..h).map(|_| lines.next().unwrap_or("").chars().collect()).collect()),
+                "end" => break,
+                _ => {}
+            }
+        }
+        if w <= 0 || h <= 0 || grids.len() < 3 {
+            return Err("art has no size or rows".into());
+        }
+        let col = |k: char| cols.iter().find(|c| c.0 == k).map(|c| c.1).unwrap_or(INK);
+        let mut art = Art::new(&name, w, h);
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let g = |n: usize| grids[n].get(y).and_then(|r| r.get(x)).copied().unwrap_or(' ');
+                art.cells[y * w as usize + x] = Cell::new(g(0), col(g(1)), col(g(2)));
+            }
+        }
+        Ok(art)
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -193,9 +291,10 @@ enum Ask {
     NewEntry(bool),
     SocketTag,
     Glyph(bool),
+    ArtGlyph,
 }
 
-struct Forge {
+struct Crucible {
     project: String,
     dir: PathBuf,
     lib: Vec<Entry>,
@@ -212,9 +311,16 @@ struct Forge {
     ask: Option<(Ask, String)>,
     note: String,
     view: (i32, i32, i32, i32),
+    art: Art,
+    ax: i32,
+    ay: i32,
+    ink: usize,
+    paper: usize,
+    aglyph: char,
+    typing: bool,
 }
 
-impl Forge {
+impl Crucible {
     fn mats(&self) -> Vec<usize> {
         (0..self.lib.len()).filter(|&i| !self.lib[i].kind).collect()
     }
@@ -277,6 +383,26 @@ impl Forge {
     fn answer(&mut self, what: Ask, text: String) {
         let t = text.trim().to_string();
         match what {
+            Ask::New if self.mode == Mode::Art => {
+                let v: Vec<&str> = t.split_whitespace().collect();
+                let n = |i: usize, d: i32| v.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
+                if let Some(name) = v.first() {
+                    self.art = Art::new(name, n(1, 40).clamp(1, 300), n(2, 10).clamp(1, 200));
+                    (self.ax, self.ay) = (0, 0);
+                    self.note = format!("New art {name}");
+                }
+            }
+            Ask::Open if self.mode == Mode::Art => {
+                let path = self.dir.join("art").join(format!("{t}.tart"));
+                match fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|s| Art::from_text(&s)) {
+                    Ok(a) => {
+                        self.art = a;
+                        (self.ax, self.ay) = (0, 0);
+                        self.note = format!("Opened {t}");
+                    }
+                    Err(e) => self.note = format!("Could not open {t}: {e}"),
+                }
+            }
             Ask::New => {
                 let v: Vec<&str> = t.split_whitespace().collect();
                 let n = |i: usize, d: i32| v.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
@@ -315,12 +441,12 @@ impl Forge {
                 self.part.sockets.retain(|k| !(k.x == x && k.y == y && k.z == z));
                 self.part.sockets.push(Socket { x, y, z, dir: 0, tag: if t.is_empty() { "any".into() } else { t.replace(' ', "-") } });
             }
-            Ask::Glyph(_) => {}
+            Ask::Glyph(_) | Ask::ArtGlyph => {}
         }
     }
 }
 
-impl Game for Forge {
+impl Game for Crucible {
     fn tick(&mut self) {}
 
     fn ticks_per_second(&self) -> f64 {
@@ -330,6 +456,12 @@ impl Game for Forge {
     fn on_key(&mut self, k: KeyEvent) -> Flow {
         // A question being answered.
         if let Some((what, mut text)) = self.ask.take() {
+            if what == Ask::ArtGlyph {
+                if let Key::Char(c) = k.key {
+                    self.aglyph = c;
+                }
+                return Flow::Continue;
+            }
             if let Ask::Glyph(floor) = what {
                 if let Key::Char(c) = k.key {
                     if let Some(e) = self.lib.get_mut(self.pick) {
@@ -354,15 +486,20 @@ impl Game for Forge {
             return Flow::Continue;
         }
         if k.key == Key::Esc {
+            if self.typing {
+                self.typing = false;
+                return Flow::Continue;
+            }
             return Flow::Quit;
         }
         if k.key == Key::Tab {
-            self.mode = if self.mode == Mode::Part { Mode::Library } else { Mode::Part };
+            self.mode = match self.mode { Mode::Part => Mode::Library, Mode::Library => Mode::Art, Mode::Art => Mode::Part };
+            self.typing = false;
             return Flow::Continue;
         }
         if k.ctrl {
             match k.key {
-                Key::Char('s') => if self.mode == Mode::Part { self.save_part() } else { self.save_lib() },
+                Key::Char('s') => match self.mode { Mode::Part => self.save_part(), Mode::Library => self.save_lib(), Mode::Art => self.save_art() },
                 Key::Char('n') => self.ask = Some((Ask::New, String::new())),
                 Key::Char('o') => self.ask = Some((Ask::Open, String::new())),
                 _ => {}
@@ -372,12 +509,22 @@ impl Game for Forge {
         match self.mode {
             Mode::Library => self.library_key(k),
             Mode::Part => self.part_key(k),
+            Mode::Art => self.art_key(k),
         }
         Flow::Continue
     }
 
     fn on_mouse(&mut self, m: MouseEvent) -> Flow {
         let (vx, vy, vw, vh) = self.view;
+        if self.mode == Mode::Art && m.x >= vx && m.y >= vy && m.x < vx + vw && m.y < vy + vh {
+            (self.ax, self.ay) = (m.x - vx, m.y - vy);
+            if matches!(m.kind, MouseKind::Down(MouseButton::Left) | MouseKind::Drag(MouseButton::Left)) {
+                self.art_put(self.aglyph);
+            } else if matches!(m.kind, MouseKind::Down(MouseButton::Right) | MouseKind::Drag(MouseButton::Right)) {
+                self.art_put(' ');
+            }
+            return Flow::Continue;
+        }
         if self.mode == Mode::Part && m.x >= vx && m.y >= vy && m.x < vx + vw && m.y < vy + vh {
             self.cx = (m.x - vx).min(self.part.bp.w - 1);
             self.cy = (m.y - vy).min(self.part.bp.h - 1);
@@ -395,15 +542,17 @@ impl Game for Forge {
         f.clear(BG);
         let (fw, fh) = (f.width(), f.height());
         let canvas = Rect { x: 0, y: 1, w: (fw - PANEL_W).max(10), h: fh - 3 };
-        f.text_clip(1, 0, fw - 2, &format!("The Forge · project {} · {}", self.project, if self.mode == Mode::Part { "Part" } else { "Library" }), GOLD, BG);
+        f.text_clip(1, 0, fw - 2, &format!("The Crucible · project {} · {}", self.project, match self.mode { Mode::Part => "Part", Mode::Library => "Library", Mode::Art => "Art" }), GOLD, BG);
         match self.mode {
             Mode::Part => self.draw_part(f, canvas),
             Mode::Library => self.draw_library(f, canvas),
+            Mode::Art => self.draw_art(f, canvas),
         }
         let foot = match &self.ask {
+            Some((Ask::ArtGlyph, _)) => "Press the key for the brush glyph".to_string(),
             Some((Ask::Glyph(fl), _)) => format!("Press the key for the {} glyph", if *fl { "floor" } else { "wall/thing" }),
-            Some((Ask::New, t)) => format!("New part: name width height levels > {t}_"),
-            Some((Ask::Open, t)) => format!("Open part > {t}_"),
+            Some((Ask::New, t)) => if self.mode == Mode::Art { format!("New art: name width height > {t}_") } else { format!("New part: name width height levels > {t}_") },
+            Some((Ask::Open, t)) => format!("Open {} > {t}_", if self.mode == Mode::Art { "art" } else { "part" }),
             Some((Ask::Rename, t)) => format!("Rename to > {t}_"),
             Some((Ask::NewEntry(k), t)) => format!("New {} > {t}_", if *k { "kind" } else { "material" }),
             Some((Ask::SocketTag, t)) => format!("Socket tag (what fits here: wall, door, deck...) > {t}_"),
@@ -413,7 +562,7 @@ impl Game for Forge {
     }
 }
 
-impl Forge {
+impl Crucible {
     fn part_key(&mut self, k: KeyEvent) {
         let (w, h, d) = (self.part.bp.w, self.part.bp.h, self.part.bp.d);
         match k.key {
@@ -468,6 +617,99 @@ impl Forge {
                 self.part.sockets.retain(|s| !(s.x == x && s.y == y && s.z == z));
             }
             _ => {}
+        }
+    }
+
+    fn art_put(&mut self, ch: char) {
+        let (x, y) = (self.ax, self.ay);
+        if x >= 0 && y >= 0 && x < self.art.w && y < self.art.h {
+            self.art.cells[(y * self.art.w + x) as usize] = Cell::new(ch, PALETTE[self.ink], PALETTE[self.paper]);
+        }
+    }
+
+    fn save_art(&mut self) {
+        let path = self.dir.join("art").join(format!("{}.tart", self.art.name));
+        let _ = fs::create_dir_all(self.dir.join("art"));
+        self.note = match fs::write(&path, self.art.text()) {
+            Ok(_) => format!("Saved {}", path.display()),
+            Err(e) => format!("Could not save: {e}"),
+        };
+    }
+
+    fn art_key(&mut self, k: KeyEvent) {
+        let (w, h) = (self.art.w, self.art.h);
+        if self.typing {
+            match k.key {
+                Key::Enter => self.typing = false,
+                Key::Backspace => {
+                    self.ax = (self.ax - 1).max(0);
+                    self.art_put(' ');
+                }
+                Key::Char(c) => {
+                    self.art_put(c);
+                    self.ax = (self.ax + 1).min(w - 1);
+                }
+                Key::Left => self.ax = (self.ax - 1).max(0),
+                Key::Right => self.ax = (self.ax + 1).min(w - 1),
+                Key::Up => self.ay = (self.ay - 1).max(0),
+                Key::Down => self.ay = (self.ay + 1).min(h - 1),
+                _ => {}
+            }
+            return;
+        }
+        let n = PALETTE.len();
+        match k.key {
+            Key::Left => self.ax = (self.ax - 1).max(0),
+            Key::Right => self.ax = (self.ax + 1).min(w - 1),
+            Key::Up => self.ay = (self.ay - 1).max(0),
+            Key::Down => self.ay = (self.ay + 1).min(h - 1),
+            Key::Char(' ') => self.art_put(self.aglyph),
+            Key::Delete => self.art_put(' '),
+            Key::Enter => self.typing = true,
+            Key::Char('g') => self.ask = Some((Ask::ArtGlyph, String::new())),
+            Key::Char('c') => self.ink = (self.ink + 1) % n,
+            Key::Char('C') => self.ink = (self.ink + n - 1) % n,
+            Key::Char('v') => self.paper = (self.paper + 1) % n,
+            Key::Char('V') => self.paper = (self.paper + n - 1) % n,
+            _ => {}
+        }
+    }
+
+    fn draw_art(&mut self, f: &mut Frame, r: Rect) {
+        let a = &self.art;
+        let (vw, vh) = (a.w.min(r.w - 2), a.h.min(r.h - 2));
+        let ox = r.x + 1 + ((r.w - 2 - vw) / 2).max(0);
+        let oy = r.y + 1 + ((r.h - 2 - vh) / 2).max(0);
+        self.view = (ox, oy, vw, vh);
+        f.border(Rect { x: ox - 1, y: oy - 1, w: vw + 2, h: vh + 2 }, DIM, BG, &format!(" {} ", a.name));
+        for y in 0..vh {
+            for x in 0..vw {
+                f.set(ox + x, oy + y, a.cells[(y * a.w + x) as usize]);
+            }
+        }
+        let cur = f.get(ox + self.ax, oy + self.ay);
+        f.set(ox + self.ax, oy + self.ay, Cell::new(if cur.ch == ' ' { '_' } else { cur.ch }, BG, if self.typing { GOLD } else { INK }));
+        let px = f.width() - PANEL_W;
+        let mut y = r.y;
+        f.text_clip(px + 1, y, PANEL_W - 2, &format!("Cursor {},{}  {} x {}", self.ax, self.ay, a.w, a.h), INK, BG);
+        y += 2;
+        f.text_clip(px + 1, y, PANEL_W - 2, "Brush", GOLD, BG);
+        f.set(px + 8, y, Cell::new(self.aglyph, PALETTE[self.ink], PALETTE[self.paper]));
+        y += 2;
+        f.text_clip(px + 1, y, PANEL_W - 2, "Ink and paper", GOLD, BG);
+        y += 1;
+        for (i, c) in PALETTE.iter().enumerate() {
+            let mark = if i == self.ink { 'i' } else if i == self.paper { 'p' } else { ' ' };
+            f.set(px + 1 + i as i32 * 2, y, Cell::new(mark, if c.0 as u32 + c.1 as u32 + c.2 as u32 > 300 { BG } else { INK }, *c));
+            f.set(px + 2 + i as i32 * 2, y, Cell::new(' ', INK, *c));
+        }
+        y += 2;
+        for help in ["Space paint  Del clear  mouse too", "g glyph  c C ink  v V paper", "Enter: type text (Enter stops)", "^S save ^N new ^O open  Tab next"] {
+            f.text_clip(px + 1, y, PANEL_W - 2, help, DIM, BG);
+            y += 1;
+        }
+        if self.typing {
+            f.text_clip(px + 1, y + 1, PANEL_W - 2, "TYPING", GOLD, BG);
         }
     }
 
@@ -619,14 +861,15 @@ impl Forge {
 
 fn main() -> io::Result<()> {
     let project = std::env::args().nth(1).unwrap_or_else(|| "default".into());
-    let dir = PathBuf::from("forge").join(&project);
+    let dir = PathBuf::from("crucible").join(&project);
     fs::create_dir_all(dir.join("parts"))?;
+    fs::create_dir_all(dir.join("art"))?;
     let lib_path = dir.join("library.tlib");
     if !lib_path.exists() {
         fs::write(&lib_path, SEED_LIBRARY)?;
     }
     let lib = parse_library(&fs::read_to_string(&lib_path)?);
-    let mut forge = Forge {
+    let mut forge = Crucible {
         project,
         dir,
         lib,
@@ -643,6 +886,13 @@ fn main() -> io::Result<()> {
         ask: None,
         note: "Ctrl+N for a new part, Ctrl+O to open one. Tab for the library.".into(),
         view: (0, 0, 0, 0),
+        art: Art::new("logo", 40, 10),
+        ax: 0,
+        ay: 0,
+        ink: 1,
+        paper: 0,
+        aglyph: '#',
+        typing: false,
     };
     tachyon::app::run(&mut forge, 30)
 }
@@ -650,6 +900,18 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn art_round_trips() {
+        let mut a = Art::new("sign", 6, 2);
+        a.cells[0] = Cell::new('T', PALETTE[4], PALETTE[0]);
+        a.cells[7] = Cell::new('~', PALETTE[10], PALETTE[11]);
+        let back = Art::from_text(&a.text()).unwrap();
+        assert_eq!((back.w, back.h, back.name.as_str()), (6, 2, "sign"));
+        assert_eq!(back.cells[0].ch, 'T');
+        assert_eq!(back.cells[0].fg, PALETTE[4]);
+        assert_eq!(back.cells[7].bg, PALETTE[11]);
+    }
 
     #[test]
     fn library_round_trips() {
