@@ -1,18 +1,18 @@
-//! The Crucible: Tachyon's workshop for making things, for any game.
+//! The Tokamak: Tachyon's workshop for making things, for any game.
 //!
-//! A project is a folder under `crucible/`: a library of materials and kinds
+//! A project is a folder under `tokamak/`: a library of materials and kinds
 //! (what things are made of, and the things themselves: a glyph and colours
 //! each, and tags), and parts: pieces built cell by cell over several levels,
 //! with sockets where they join other parts (a castle wall to a tower, a deck
 //! to a hull), for games and procedural generation to put together.
 //!
-//!     cargo run --release --example crucible                 (project "default")
-//!     cargo run --release --example crucible -- broadside    (or any project)
+//!     cargo run --release --example tokamak                 (project "default")
+//!     cargo run --release --example tokamak -- broadside    (or any project)
 //!
-//! Art saves as `crucible/<project>/art/<name>.tart`: the glyphs, then their
+//! Art saves as `tokamak/<project>/art/<name>.tart`: the glyphs, then their
 //! colours as a small palette, all plain text.
 //!
-//! Parts save as `crucible/<project>/parts/<name>.tpart`: a Tachyon blueprint
+//! Parts save as `tokamak/<project>/parts/<name>.tpart`: a Tachyon blueprint
 //! (any game can stamp it) with its sockets after the `end` line.
 //!
 //! Keys (Part mode):  arrows move  Space paint  Del clear (keep)
@@ -294,7 +294,7 @@ enum Ask {
     ArtGlyph,
 }
 
-struct Crucible {
+struct Tokamak {
     project: String,
     dir: PathBuf,
     lib: Vec<Entry>,
@@ -320,7 +320,7 @@ struct Crucible {
     typing: bool,
 }
 
-impl Crucible {
+impl Tokamak {
     fn mats(&self) -> Vec<usize> {
         (0..self.lib.len()).filter(|&i| !self.lib[i].kind).collect()
     }
@@ -446,7 +446,7 @@ impl Crucible {
     }
 }
 
-impl Game for Crucible {
+impl Game for Tokamak {
     fn tick(&mut self) {}
 
     fn ticks_per_second(&self) -> f64 {
@@ -542,7 +542,7 @@ impl Game for Crucible {
         f.clear(BG);
         let (fw, fh) = (f.width(), f.height());
         let canvas = Rect { x: 0, y: 1, w: (fw - PANEL_W).max(10), h: fh - 3 };
-        f.text_clip(1, 0, fw - 2, &format!("The Crucible · project {} · {}", self.project, match self.mode { Mode::Part => "Part", Mode::Library => "Library", Mode::Art => "Art" }), GOLD, BG);
+        f.text_clip(1, 0, fw - 2, &format!("The Tokamak · project {} · {}", self.project, match self.mode { Mode::Part => "Part", Mode::Library => "Library", Mode::Art => "Art" }), GOLD, BG);
         match self.mode {
             Mode::Part => self.draw_part(f, canvas),
             Mode::Library => self.draw_library(f, canvas),
@@ -562,7 +562,7 @@ impl Game for Crucible {
     }
 }
 
-impl Crucible {
+impl Tokamak {
     fn part_key(&mut self, k: KeyEvent) {
         let (w, h, d) = (self.part.bp.w, self.part.bp.h, self.part.bp.d);
         match k.key {
@@ -861,7 +861,7 @@ impl Crucible {
 
 fn main() -> io::Result<()> {
     let project = std::env::args().nth(1).unwrap_or_else(|| "default".into());
-    let dir = PathBuf::from("crucible").join(&project);
+    let dir = PathBuf::from("tokamak").join(&project);
     fs::create_dir_all(dir.join("parts"))?;
     fs::create_dir_all(dir.join("art"))?;
     let lib_path = dir.join("library.tlib");
@@ -869,7 +869,7 @@ fn main() -> io::Result<()> {
         fs::write(&lib_path, SEED_LIBRARY)?;
     }
     let lib = parse_library(&fs::read_to_string(&lib_path)?);
-    let mut forge = Crucible {
+    let mut app = Tokamak {
         project,
         dir,
         lib,
@@ -894,7 +894,7 @@ fn main() -> io::Result<()> {
         aglyph: '#',
         typing: false,
     };
-    tachyon::app::run(&mut forge, 30)
+    tachyon::app::run(&mut app, 30)
 }
 
 #[cfg(test)]
