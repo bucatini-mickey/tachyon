@@ -227,3 +227,112 @@ pub fn skyline(eye: (f32, f32, f32), bearing: f32, max: f32, steps: usize, sea_l
         })
         .collect()
 }
+
+/// Elevation angle (radians) of a point `h` metres above the sea at range
+/// `d`, seen from an eye `eye_h` metres up, after the earth's curve.
+#[inline]
+pub fn elevation(eye_h: f32, d: f32, h: f32) -> f32 {
+    ((h - eye_h - drop(d)) / d.max(0.1)).atan()
+}
+
+/// The field of a first-person view (a glass, or the naked eye) laid over a
+/// grid of `cols` x `rows` cells: which bearing each column looks along and
+/// which elevation each row is at. A cell is taken to be `cell_aspect` times
+/// taller than it is wide (2 for a terminal).
+#[derive(Clone, Copy, Debug)]
+pub struct Field {
+    /// Compass bearing of the centre of the field (radians).
+    pub bearing: f32,
+    /// Width of the field (radians).
+    pub width: f32,
+    /// Height of the field (radians).
+    pub height: f32,
+    /// Elevation of the centre of the field (radians, up is positive).
+    pub pitch: f32,
+    pub cols: i32,
+    pub rows: i32,
+}
+
+impl Field {
+    /// A field `width` radians wide; its height follows the grid's shape
+    /// (cells `cell_aspect` times taller than wide), but never less than
+    /// `min_height`, so a strong glass is not a letterbox.
+    pub fn new(bearing: f32, width: f32, pitch: f32, cols: i32, rows: i32, cell_aspect: f32, min_height: f32) -> Field {
+        let (cols, rows) = (cols.max(1), rows.max(1));
+        let height = (width * rows as f32 / cols as f32 * cell_aspect).max(min_height);
+        Field { bearing, width, height, pitch, cols, rows }
+    }
+
+    /// The bearing down the middle of column `col`.
+    pub fn bearing_of(&self, col: i32) -> f32 {
+        (self.bearing - self.width / 2.0 + self.width * (col as f32 + 0.5) / self.cols as f32).rem_euclid(std::f32::consts::TAU)
+    }
+
+    /// Where a bearing falls across the field, in columns (fractional; off
+    /// the field is < 0 or >= cols).
+    pub fn column(&self, bearing: f32) -> f32 {
+        let off = (bearing - self.bearing + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        (off + self.width / 2.0) / self.width * self.cols as f32
+    }
+
+    /// Where an elevation falls down the field, in rows (0 is the top).
+    pub fn row(&self, elevation: f32) -> f32 {
+        (self.pitch + self.height / 2.0 - elevation) / self.height * self.rows as f32
+    }
+
+    /// The elevation at the middle of row `row`.
+    pub fn elevation_of(&self, row: i32) -> f32 {
+        self.pitch + self.height / 2.0 - self.height * (row as f32 + 0.5) / self.rows as f32
+    }
+
+    /// The row the sea horizon falls on, from an eye `eye_h` above the sea.
+    pub fn horizon_row(&self, eye_h: f32) -> f32 {
+        let hz = horizon(eye_h.max(0.01));
+        self.row(elevation(eye_h, hz, 0.0))
+    }
+}
+
+/// A stretch of ground showing in one column of a [`Field`]: rows `top` to
+/// `bottom` (exclusive), its face `range` metres off and `height` above the
+/// sea.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Band {
+    pub top: i32,
+    pub bottom: i32,
+    pub range: f32,
+    pub height: f32,
+}
+
+/// What ground shows in each column of `field` from `eye` (x, y, height
+/// above mean sea level), out to `max` metres: a heightfield raycast. Each
+/// column's ray is marched outward and every time the ground clears
+/// everything nearer, the rows it newly fills become a band, so the picture
+/// builds from the bottom up and a far hill shows only above a near one.
+/// Bands come nearest first. Ground at or below `sea_level` is sea and gives
+/// no band.
+pub fn ground_bands(eye: (f32, f32, f32), field: &Field, max: f32, sea_level: f32, ground: impl Fn(f32, f32) -> f32) -> Vec<Vec<Band>> {
+    let eye_h = eye.2 - sea_level;
+    (0..field.cols)
+        .map(|col| {
+            let b = field.bearing_of(col);
+            let (sx, sy) = (b.sin(), -b.cos());
+            let mut out = Vec::new();
+            let mut low = field.rows; // first row not yet filled, from the bottom
+            let mut d = 5.0f32;
+            while d < max && low > 0 {
+                // The sea fills rows too (up to its horizon), so a coast
+                // stands on the water rather than on the bottom of the field.
+                let g = ground(eye.0 + sx * d, eye.1 + sy * d) - sea_level;
+                let top = field.row(elevation(eye_h, d, g.max(0.0))).round().max(0.0) as i32;
+                if top < low {
+                    if g > 0.0 {
+                        out.push(Band { top, bottom: low, range: d, height: g });
+                    }
+                    low = top;
+                }
+                d += (d * 0.03).max(5.0);
+            }
+            out
+        })
+        .collect()
+}

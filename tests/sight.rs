@@ -1,6 +1,6 @@
 //! Seeing far: horizon, hull down, high ground, haze, glass and night.
 
-use tachyon::sight::{horizon, look, Air, Murk, Obstacle, Target};
+use tachyon::sight::{ground_bands, horizon, look, Air, Field, Murk, Obstacle, Target};
 
 fn ship(x: f32, y: f32) -> Target {
     // A frigate: hull to 5 m, masts to 45 m, 40 m long, dark against the sea.
@@ -89,4 +89,40 @@ fn a_heavy_sea_raises_the_horizon_and_hides_a_boat_in_the_troughs() {
     let rough = look((0.0, 0.0, 5.0), &boat, &Air { waves: 4.0, ..Air::default() }, 1.0, sea);
     assert!(calm.showing > 1.0, "in a calm she shows: {:.2}", calm.showing);
     assert!(rough.showing < 0.5 * calm.showing, "in a big sea she is mostly hidden: {:.2}", rough.showing);
+}
+
+#[test]
+fn a_field_maps_bearings_and_elevations_to_cells_and_back() {
+    let f = Field::new(0.5, 0.2, 0.0, 40, 20, 2.0, 0.0);
+    assert!((f.height - 0.2).abs() < 1e-5);
+    assert!((f.column(0.5) - 20.0).abs() < 1e-3);
+    assert!(f.column(0.5 + 0.11) >= 40.0 && f.column(0.5 - 0.11) < 0.0);
+    assert!((f.column(f.bearing_of(7)) - 7.5).abs() < 1e-3);
+    assert!((f.row(0.0) - 10.0).abs() < 1e-3);
+    assert!((f.row(f.elevation_of(3)) - 3.5).abs() < 1e-3);
+    // Across north: a field centred on 0 still finds a bearing of 359 deg.
+    let n = Field::new(0.0, 0.2, 0.0, 40, 20, 2.0, 0.0);
+    assert!((n.column(std::f32::consts::TAU - 0.05) - 10.0).abs() < 1e-2);
+    // The horizon from 5 m is a little below the level row.
+    assert!(f.horizon_row(5.0) > 10.0 && f.horizon_row(5.0) < 11.0);
+}
+
+#[test]
+fn ground_bands_show_a_far_hill_only_above_a_near_one() {
+    // A low island 1 km north, a high one 3 km north.
+    let ground = |x: f32, y: f32| {
+        let hill = |cy: f32, r: f32, h: f32| { let d = (x * x + (y - cy).powi(2)).sqrt() / r; if d < 1.0 { h * (1.0 - d * d) } else { -50.0 } };
+        hill(-1000.0, 200.0, 10.0).max(hill(-3000.0, 400.0, 120.0))
+    };
+    let f = Field::new(0.0, 0.1, 0.01, 21, 40, 2.0, 0.0);
+    let bands = ground_bands((0.0, 0.0, 5.0), &f, 6000.0, 0.0, ground);
+    let mid = &bands[10];
+    assert!(mid.len() >= 2, "{mid:?}");
+    assert!(mid[0].range < 1300.0 && mid.last().unwrap().range > 2500.0);
+    for w in mid.windows(2) {
+        assert!(w[1].bottom == w[0].top && w[1].top < w[0].top);
+    }
+    // Open sea to the south: nothing.
+    let s = ground_bands((0.0, 0.0, 5.0), &Field::new(std::f32::consts::PI, 0.1, 0.0, 5, 10, 2.0, 0.0), 6000.0, 0.0, ground);
+    assert!(s.iter().all(|c| c.is_empty()));
 }

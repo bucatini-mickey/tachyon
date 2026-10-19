@@ -26,6 +26,7 @@ src/
             weather projectile                   gusting wind and rain; things in flight, explode()
   life/     body needs mind ai path species      creatures: tissue-layer bodies, needs, routines, A*
   sea/      field craft ballistics sight         the sea as fields (tachyon::sea::Sea); ships posed on it; shot; long sight
+                                                 (+ sight::Field and ground_bands for first-person views)
   make/     atlas blueprint worldgen lang        authored world map + structures (text formats); generated names
   draw/     frame view/ ui display               cell buffer (+ to_html/to_text); map view; widgets; ASCII + colour schemes
   backend/  term input app                       diffed terminal writer; input events; Game trait + main loop
