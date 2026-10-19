@@ -42,14 +42,29 @@ const WAKE_CHANGE: f32 = 0.05;
 /// until the rolling sweep wakes the chunk.
 const WAKE_JUMP: f32 = 0.5;
 
-pub fn step(w: &mut World, chunks: &[usize], rng: &mut Rng, next: &mut [f32], edge: &mut Vec<(u32, f32)>) {
+/// `scratch` holds `[next temperature, conductance, heat capacity]` per cell.
+pub fn step(w: &mut World, chunks: &[usize], rng: &mut Rng, scratch: &mut [[f32; 3]], edge: &mut Vec<(u32, f32)>) {
     let layer = w.layer();
     let (ww, hh, dd) = (w.w, w.h, w.d);
     let wwu = ww as usize;
     let (ambient, ground) = (w.ambient, w.ground_temp);
     let (cw, per) = (w.wake.cw as usize, (w.wake.cw * w.wake.ch) as usize);
 
-    // 1. Conduction into `next`. Heat that flows across into a sleeping
+    // 0. Conductance and heat capacity of every simulated cell, once, rather
+    // than once per neighbour asking. (`live` below means the neighbour's
+    // chunk is in `chunks`, so it has been filled in.)
+    for &c in chunks {
+        let (x0, y0, x1, y1, z) = w.wake.bounds(c);
+        for y in y0..y1 {
+            let row = w.idx(0, y, z);
+            for i in row + x0 as usize..row + x1 as usize {
+                let (k, cap) = thermal(w, i);
+                scratch[i] = [0.0, k, cap];
+            }
+        }
+    }
+
+    // 1. Conduction into the scratch. Heat that flows across into a sleeping
     // chunk is collected in `edge` and handed over afterwards, so it is
     // conserved even though the sleeping side is not simulated.
     edge.clear();
@@ -69,11 +84,11 @@ pub fn step(w: &mut World, chunks: &[usize], rng: &mut Rng, next: &mut [f32], ed
             for x in x0..x1 {
                 let i = row + x as usize;
                 let t = w.temp[i];
-                let (ci, cap) = thermal(w, i);
+                let [_, ci, cap] = scratch[i];
                 let mut flow = 0.0;
                 // `conv` scales the flow (convection); `live`: the neighbour is simulated too.
                 let mut side = |n: usize, conv: f32, live: bool| {
-                    let (cn, _) = thermal(w, n);
+                    let cn = if live { scratch[n][1] } else { thermal(w, n).0 };
                     let f = ci.min(cn) * conv * (w.temp[n] - t);
                     flow += f;
                     if !live {
@@ -118,7 +133,7 @@ pub fn step(w: &mut World, chunks: &[usize], rng: &mut Rng, next: &mut [f32], ed
                         nt = st;
                     }
                 }
-                next[i] = nt;
+                scratch[i][0] = nt;
             }
         }
     }
@@ -140,7 +155,7 @@ pub fn step(w: &mut World, chunks: &[usize], rng: &mut Rng, next: &mut [f32], ed
                 let i = row + x as usize;
                 // Always write back, however small the change: dropping tiny
                 // gains while keeping the matching losses would leak heat.
-                let nt = next[i];
+                let nt = scratch[i][0];
                 if (nt - w.temp[i]).abs() > WAKE_CHANGE {
                     w.wake.touch(i);
                 }

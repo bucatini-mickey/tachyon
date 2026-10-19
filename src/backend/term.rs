@@ -2,14 +2,16 @@
 //!
 //! `present` compares the new frame with the last one shown and writes only
 //! the cells that changed, skipping cursor moves for runs of adjacent ASCII
-//! cells and colour codes when the colour is unchanged. Non-ASCII glyphs are
-//! always followed by an explicit cursor move: terminals disagree about how
-//! wide some of them are, and trusting the advance lets a row drift. The whole update goes out
+//! cells and colour codes when the colour is unchanged. Every cell goes out
+//! through the terminal's [`Display`]: pure ASCII by default, in the chosen
+//! colour scheme. In `Extended` mode a non-ASCII glyph is always followed by
+//! an explicit cursor move: terminals disagree about how wide some of them
+//! are, and trusting the advance lets a row drift. The whole update goes out
 //! in a single write wrapped in "synchronized output" markers, so terminals
 //! that support them (Windows Terminal, kitty, WezTerm, iTerm2) never show a
 //! half-drawn frame.
 
-use crate::color::Rgb;
+use crate::display::{push_num, Display, Ink};
 use crate::frame::Frame;
 use crate::input::{Event, Key, KeyEvent, MouseButton, MouseEvent, MouseKind};
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind, KeyModifiers, MouseButton as CButton, MouseEventKind};
@@ -26,6 +28,8 @@ pub struct Terminal {
     out: io::Stdout,
     prev: Option<Frame>,
     buf: Vec<u8>,
+    /// How cells become characters and colours (see `set_display`).
+    display: Display,
     /// Bytes written by the last `present`.
     pub last_bytes: usize,
     /// Cells changed by the last `present`.
@@ -76,11 +80,23 @@ impl Terminal {
         )?;
         enhance_keys(&mut out);
         execute!(out, event::EnableMouseCapture)?;
-        Ok(Terminal { down: Vec::new(), real_releases: false, polled_releases: false, out, prev: None, buf: Vec::with_capacity(1 << 16), last_bytes: 0, last_cells: 0 })
+        Ok(Terminal { down: Vec::new(), real_releases: false, polled_releases: false, out, prev: None, buf: Vec::with_capacity(1 << 16), display: Display::from_env(), last_bytes: 0, last_cells: 0 })
     }
 
     pub fn size() -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
+    }
+
+    pub fn display(&self) -> Display {
+        self.display
+    }
+
+    /// Change how cells reach the screen; repaints everything if it changed.
+    pub fn set_display(&mut self, d: Display) {
+        if d != self.display {
+            self.display = d;
+            self.invalidate();
+        }
     }
 
     /// Force the next `present` to redraw everything.
@@ -102,8 +118,9 @@ impl Terminal {
         let (w, h) = (f.width(), f.height());
         let cells = f.cells();
         let prev = self.prev.as_ref().map(|p| p.cells());
-        let mut fg: Option<Rgb> = None;
-        let mut bg: Option<Rgb> = None;
+        let d = self.display;
+        let mut fg: Option<Ink> = None;
+        let mut bg: Option<Ink> = None;
         let mut cursor: Option<(i32, i32)> = None;
         let mut changed = 0;
         let mut utf8 = [0u8; 4];
@@ -130,22 +147,22 @@ impl Terminal {
                     push_num(buf, (x + 1) as u32);
                     buf.push(b'H');
                 }
-                if fg != Some(c.fg) {
-                    buf.extend_from_slice(b"\x1b[38;2;");
-                    push_rgb(buf, c.fg);
-                    fg = Some(c.fg);
+                let (f_ink, b_ink) = (d.ink(c.fg, false), d.ink(c.bg, true));
+                if fg != Some(f_ink) {
+                    Display::push_sgr(buf, f_ink, false);
+                    fg = Some(f_ink);
                 }
-                if bg != Some(c.bg) {
-                    buf.extend_from_slice(b"\x1b[48;2;");
-                    push_rgb(buf, c.bg);
-                    bg = Some(c.bg);
+                if bg != Some(b_ink) {
+                    Display::push_sgr(buf, b_ink, true);
+                    bg = Some(b_ink);
                 }
-                buf.extend_from_slice(c.ch.encode_utf8(&mut utf8).as_bytes());
+                let ch = d.glyph(c.ch);
+                buf.extend_from_slice(ch.encode_utf8(&mut utf8).as_bytes());
                 // How far the cursor moves after a non-ASCII glyph depends on
                 // the terminal and font (some draw box, block and symbol
                 // characters two columns wide), so only trust ASCII to
                 // advance it by one; otherwise move explicitly next time.
-                if c.ch.is_ascii() {
+                if ch.is_ascii() {
                     cursor = Some((x + 1, y));
                 } else {
                     cursor = None;
@@ -334,27 +351,3 @@ fn translate(code: KeyCode, m: KeyModifiers) -> Option<KeyEvent> {
     })
 }
 
-#[inline]
-fn push_num(buf: &mut Vec<u8>, mut n: u32) {
-    let mut tmp = [0u8; 10];
-    let mut i = tmp.len();
-    loop {
-        i -= 1;
-        tmp[i] = b'0' + (n % 10) as u8;
-        n /= 10;
-        if n == 0 {
-            break;
-        }
-    }
-    buf.extend_from_slice(&tmp[i..]);
-}
-
-#[inline]
-fn push_rgb(buf: &mut Vec<u8>, c: Rgb) {
-    push_num(buf, c.0 as u32);
-    buf.push(b';');
-    push_num(buf, c.1 as u32);
-    buf.push(b';');
-    push_num(buf, c.2 as u32);
-    buf.push(b'm');
-}

@@ -3,9 +3,15 @@
 //!
 //! Simulation and drawing are decoupled: the sim advances in whole ticks at
 //! `ticks_per_second` (which the game can change, or set to 0 to pause), and
-//! frames are drawn as fast as `max_fps` allows. Input is handled the moment
-//! it arrives.
+//! frames are drawn at up to `max_fps`, but only when something happened
+//! (input, a tick) or every `IDLE` otherwise, so a paused game costs next to
+//! nothing. Input is handled the moment it arrives.
+//!
+//! Three keys work in every game: Ctrl+L repaints, Ctrl+T cycles the colour
+//! scheme and Ctrl+G switches between pure ASCII and extended glyphs (see
+//! [`crate::display`]).
 
+use crate::display::{Charset, Display};
 use crate::frame::Frame;
 use crate::input::{Event, Key, KeyEvent, MouseEvent};
 use crate::term::Terminal;
@@ -34,6 +40,8 @@ pub struct LoopStats {
     pub cells_changed: usize,
     /// Where key releases come from: "terminal", "keyboard poll", or "none yet".
     pub key_ups: &'static str,
+    /// How the frame is being shown (charset, colour scheme).
+    pub display: Display,
 }
 
 pub trait Game {
@@ -56,6 +64,10 @@ pub trait Game {
     fn ticks_per_second(&self) -> f64;
 }
 
+/// With no input and no ticks, the screen is still redrawn this often (for
+/// animation in `Game::update` and the timing figures).
+const IDLE: Duration = Duration::from_millis(100);
+
 /// Run a game in the terminal until it quits (or Ctrl-C).
 pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
     let mut term = Terminal::enter()?;
@@ -67,6 +79,8 @@ pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
     let mut acc = 0.0f64;
     let mut next_frame = Instant::now();
     let mut fps_window = (Instant::now(), 0u32, 0u32);
+    let mut dirty = true;
+    let mut last_draw = Instant::now();
     let smooth = |old: f32, new: f32| if old == 0.0 { new } else { old * 0.9 + new * 0.1 };
 
     loop {
@@ -74,7 +88,9 @@ pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
         loop {
             let now = Instant::now();
             let timeout = next_frame.saturating_duration_since(now);
-            match term.poll(timeout)? {
+            let ev = term.poll(timeout)?;
+            dirty |= ev.is_some();
+            match ev {
                 Some(Event::Key(k)) => {
                     if k.ctrl && k.key == Key::Char('c') {
                         return Ok(());
@@ -82,6 +98,16 @@ pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
                     if k.ctrl && k.key == Key::Char('l') {
                         // Repaint everything (the classic terminal shortcut).
                         term.invalidate();
+                        continue;
+                    }
+                    if k.ctrl && (k.key == Key::Char('t') || k.key == Key::Char('g')) {
+                        let mut d = term.display();
+                        if k.key == Key::Char('t') {
+                            d.scheme = d.scheme.next();
+                        } else {
+                            d.charset = if d.charset == Charset::Ascii { Charset::Extended } else { Charset::Ascii };
+                        }
+                        term.set_display(d);
                         continue;
                     }
                     if game.on_key(k) == Flow::Quit {
@@ -121,6 +147,7 @@ pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
                 n += 1;
             }
             if n > 0 {
+                dirty = true;
                 stats.tick_ms = smooth(stats.tick_ms, t.elapsed().as_secs_f32() * 1000.0 / n as f32);
                 fps_window.2 += n;
             }
@@ -132,6 +159,11 @@ pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
         }
 
         game.update();
+        if !dirty && last_draw.elapsed() < IDLE {
+            continue;
+        }
+        dirty = false;
+        last_draw = Instant::now();
 
         // Draw.
         let t = Instant::now();
@@ -143,6 +175,7 @@ pub fn run<G: Game>(game: &mut G, max_fps: u32) -> io::Result<()> {
         stats.bytes = term.last_bytes;
         stats.key_ups = term.key_ups();
         stats.cells_changed = term.last_cells;
+        stats.display = term.display();
 
         fps_window.1 += 1;
         let el = fps_window.0.elapsed().as_secs_f32();

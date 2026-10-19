@@ -11,6 +11,8 @@ pub mod fluid;
 pub mod gas;
 pub mod heat;
 pub mod light;
+pub mod projectile;
+pub mod weather;
 
 use crate::geom::Pos;
 use crate::material::MatId;
@@ -77,7 +79,7 @@ pub struct Sim {
     chunks: Vec<usize>,
     delta: Vec<i16>,
     touched: Vec<u32>,
-    temp_next: Vec<f32>,
+    heat_scratch: Vec<[f32; 3]>,
     edge: Vec<(u32, f32)>,
     queue: VecDeque<u32>,
     /// Scratch and limits for liquid pressure (see `fluid::pressure`).
@@ -97,7 +99,7 @@ impl Sim {
             chunks: Vec::new(),
             delta: Vec::new(),
             touched: Vec::new(),
-            temp_next: Vec::new(),
+            heat_scratch: Vec::new(),
             edge: Vec::new(),
             queue: VecDeque::new(),
             pressure: fluid::Pressure::new(),
@@ -133,7 +135,7 @@ impl Sim {
         self.stats.total_chunks = world.wake.total();
         if self.delta.len() != world.len() {
             self.delta = vec![0; world.len()];
-            self.temp_next = vec![0.0; world.len()];
+            self.heat_scratch = vec![[0.0; 3]; world.len()];
         }
 
         let t = Instant::now();
@@ -151,7 +153,7 @@ impl Sim {
 
         let t = Instant::now();
         if self.heat {
-            heat::step(world, &self.chunks, &mut self.rng, &mut self.temp_next, &mut self.edge);
+            heat::step(world, &self.chunks, &mut self.rng, &mut self.heat_scratch, &mut self.edge);
         }
         self.stats.heat_us = t.elapsed().as_micros() as u64;
 

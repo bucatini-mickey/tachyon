@@ -8,63 +8,52 @@
 //! The engine is game-agnostic. A game supplies its materials, its kinds of
 //! thing, a map and its own rules, and drives the engine through [`app::Game`].
 //!
-//! Layering (each layer only knows about the ones above it in this list):
+//! Layers, each folder only using the ones above it:
 //!
 //! ```text
-//!  color, geom, rng, noise        maths and utilities
-//!  material, tile, world          the cell grid and what cells are made of
-//!  things, clock                  objects and creatures in cells; time of day
-//!  sim                            physics over the grid (fluid, gas, heat, fire, light)
-//!  vessel                         rafts and boats floating on the liquid
-//!  movement                       moving a creature through the grid
-//!  life                           creatures: bodies and wounds, needs, minds and routines
-//!  scene                          world + things + clock + sim + vessels + life, ticked together
-//!  projectile, weather            things in flight and explosions; wind and rain
-//!  sea, craft, ballistics, sight  the open sea as fields; ships as scenes posed on it;
-//!                                 round shot; seeing over the horizon
-//!  frame, view                    composing a picture of the world into a cell buffer
-//!  term, input, app               the terminal backend and the main loop
+//!  base/     color geom rng noise                 maths and utilities
+//!  grid/     material tile world things clock     the cell world and what is in it
+//!            movement vessel scene                moving through it; rafts; the whole ticked together
+//!  sim/      fluid gas heat light flames          physics over awake chunks
+//!            weather projectile                   wind and rain; things in flight and explosions
+//!  life/     body needs mind ai path species      creatures
+//!  sea/      field craft ballistics sight         open water as fields; ships posed on it; shot; long sight
+//!  make/     atlas blueprint worldgen lang        authored world maps and structures; generated names
+//!  draw/     frame view ui display                cell pictures of the world and its screens; how they reach the screen
+//!  backend/  term input app                       the terminal, input events and the main loop
 //! ```
 //!
-//! Nothing below `term` touches the terminal, so the simulation runs headless
-//! (tests, benchmarks, servers) and a different backend (web canvas, native
+//! Every module is also re-exported at the crate root under its own name
+//! (`tachyon::world`, `tachyon::craft`, ...), so games need not know the folders.
+//!
+//! Only `backend::term` touches the terminal, so the simulation runs headless
+//! (tests, benchmarks, servers) and another backend (web canvas, native
 //! window, phone) only needs to display a [`frame::Frame`] and feed back
 //! [`input::KeyEvent`]s.
 
-pub mod app;
-pub mod atlas;
-pub mod ballistics;
-pub mod blueprint;
-pub mod clock;
-pub mod color;
-pub mod craft;
-pub mod frame;
-pub mod geom;
-pub mod input;
+pub mod backend;
+pub mod base;
+pub mod draw;
+pub mod grid;
 pub mod life;
-pub mod material;
-pub mod movement;
-pub mod noise;
-pub mod projectile;
-pub mod rng;
-pub mod scene;
+pub mod make;
 pub mod sea;
-pub mod sight;
 pub mod sim;
-pub mod term;
-pub mod things;
-pub mod tile;
-pub mod vessel;
-pub mod view;
-pub mod weather;
-pub mod world;
-pub mod worldgen;
+
+pub use backend::{app, input, term};
+pub use base::{color, geom, noise, rng};
+pub use draw::{display, frame, ui, view};
+pub use grid::{clock, material, movement, scene, things, tile, vessel, world};
+pub use make::{atlas, blueprint, lang, worldgen};
+pub use sea::{ballistics, craft, sight};
+pub use sim::{projectile, weather};
 
 /// Everything a game usually needs, in one import.
 pub mod prelude {
     pub use crate::app::{run, Flow, Game, LoopStats};
     pub use crate::clock::{Clock, Daylight};
     pub use crate::color::Rgb;
+    pub use crate::display::{Charset, Display, Scheme};
     pub use crate::frame::{Cell, Frame};
     pub use crate::geom::{Pos, Rect, DIRS4, DIRS8};
     pub use crate::input::{DirPad, Key, KeyEvent, MouseButton, MouseEvent, MouseKind};
@@ -74,8 +63,8 @@ pub mod prelude {
     pub use crate::life::{Life, LifeEvent, SpeciesId};
     pub use crate::material::{MatId, MatKind, Material, Materials, WallStyle, AIR};
     pub use crate::movement::{self, Step};
-    pub use crate::rng::{hash3, Rng};
     pub use crate::projectile::{Blast, Projectile};
+    pub use crate::rng::{hash3, Rng};
     pub use crate::scene::{Scene, SceneEvent};
     pub use crate::things::{Flame, Food, KindId, Layer, Thing, ThingId, ThingKind, Things};
     pub use crate::tile::Tile;

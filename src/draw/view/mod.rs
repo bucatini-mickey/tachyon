@@ -15,6 +15,11 @@
 //! on the open levels just above their head) is drawn in full; cells seen before are drawn from memory in grey, and the
 //! rest is black. Lighting multiplies sky light (scaled by the time of day)
 //! and coloured dynamic light into every colour.
+//!
+//! Backgrounds are kept for what they mean, classic-roguelike style: floors
+//! and walls are coloured glyphs on black, and only liquid, fire, gas, blood,
+//! items on furniture, highlights and overlays colour a cell's background.
+//! `fill` brings back the old look, every cell filled with its material.
 
 pub mod fov;
 pub mod inspect;
@@ -116,6 +121,9 @@ pub struct MapView {
     /// How many levels up a hillside's surface still shows (0 turns it off).
     pub up_depth: i32,
     pub lighting: bool,
+    /// Fill floor and wall backgrounds with their material's colour (a tiled
+    /// look). Off by default: they are drawn on black.
+    pub fill: bool,
     /// Whose eyes we see through. `None` shows everything.
     pub observer: Option<Pos>,
     pub sight_radius: i32,
@@ -148,6 +156,7 @@ impl MapView {
             depth: 4,
             up_depth: 2,
             lighting: true,
+            fill: false,
             observer: None,
             sight_radius: 40,
             cursor: None,
@@ -345,7 +354,9 @@ impl MapView {
                     }
                     let h = 0.16 * look.k as f32;
                     look.fg = look.fg.lerp(UP_HAZE, h);
-                    look.bg = look.bg.scale(0.7).lerp(UP_HAZE, h * 0.35);
+                    if self.fill {
+                        look.bg = look.bg.scale(0.7).lerp(UP_HAZE, h * 0.35);
+                    }
                 } else {
                     look = Self::remembered(look);
                 }
@@ -380,7 +391,7 @@ impl MapView {
                 let f = (1.0 - 0.17 * look.k as f32).max(0.2);
                 let h = 0.14 * look.k as f32;
                 look.fg = look.fg.scale(f).lerp(HAZE, h);
-                look.bg = look.bg.scale(f).lerp(HAZE, h * 0.6);
+                look.bg = if self.fill { look.bg.scale(f).lerp(HAZE, h * 0.6) } else { look.bg.scale(f) };
             }
             if self.lighting && !look.emissive {
                 let l = self.light_level(world, look.light_at, look.face, day);
@@ -474,7 +485,7 @@ impl MapView {
                 let m = world.mats.get(world.mat[j - world.layer()]);
                 l.ch = m.floor_glyphs[(hash3(x, y, zz - 1, 7) as usize) % m.floor_glyphs.len().max(1)];
                 l.fg = m.fg;
-                l.bg = m.bg;
+                l.bg = self.ground_bg(m);
             } else {
                 l = self.terrain(world, things, x, y, zz, tick, l);
                 l.k = k;
@@ -577,6 +588,12 @@ impl MapView {
         }
     }
 
+    /// The background behind a floor or wall of this material.
+    #[inline]
+    fn ground_bg(&self, m: &crate::material::Material) -> Rgb {
+        if self.fill { m.bg } else { Rgb::BLACK }
+    }
+
     /// Terrain look of a cell: liquid over floor, or the wall.
     #[allow(clippy::too_many_arguments)]
     fn terrain(&self, world: &World, things: &crate::things::Things, x: i32, y: i32, z: i32, tick: u64, mut l: Look) -> Look {
@@ -585,7 +602,7 @@ impl MapView {
         let m = world.mats.get(world.mat[i]);
         if tile.is_wall() {
             l.fg = m.fg;
-            l.bg = m.bg;
+            l.bg = self.ground_bg(m);
             match m.style {
                 WallStyle::Solid => {
                     l.ch = m.wall_glyph;
@@ -616,7 +633,7 @@ impl MapView {
         }
         // Floor first, liquid on top of it.
         l.fg = m.fg;
-        l.bg = m.bg;
+        l.bg = self.ground_bg(m);
         l.ch = match tile {
             Tile::Floor => m.floor_glyphs[(hash3(x, y, z, 7) as usize) % m.floor_glyphs.len().max(1)],
             Tile::Ramp => '▲',

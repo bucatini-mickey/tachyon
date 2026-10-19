@@ -982,6 +982,7 @@ fn main() -> io::Result<()> {
         let mut f = Frame::new(fw, fh);
         game.draw(&mut f, &LoopStats::default());
         game.draw(&mut f, &LoopStats::default()); // second pass: memory from the first
+        Display::from_env().apply(&mut f); // as the terminal would show it (TACHYON_SCHEME, TACHYON_CHARSET)
         std::fs::write(&path, f.to_html())?;
         std::fs::write(format!("{path}.txt"), f.to_text())?;
         println!("wrote {path}");

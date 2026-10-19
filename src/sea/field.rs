@@ -917,14 +917,14 @@ impl Sea {
             if whitecap {
                 return Cell::new('*', Rgb(230, 236, 240), bg);
             }
-            let (ch, fg) = if n > 0.9 {
+            // Only the crests are marked; between them the sea is its colour, so
+            // the eye reads the swell rather than a wall of marks.
+            let (ch, fg) = if n > 0.95 {
                 ('~', Rgb(170, 200, 225))
-            } else if n > 0.35 {
-                ('~', Rgb(90, 130, 175))
-            } else if n < -0.9 {
-                (' ', bg)
+            } else if n > 0.5 {
+                ('~', Rgb(84, 122, 168))
             } else {
-                ('-', bg.lerp(Rgb(90, 120, 160), 0.35))
+                (' ', bg)
             };
             Cell::new(ch, fg, bg)
         } else {

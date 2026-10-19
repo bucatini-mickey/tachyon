@@ -130,10 +130,8 @@ impl Frame {
     /// The frame as plain text, one line per row (for tests and snapshots).
     pub fn to_text(&self) -> String {
         let mut s = String::with_capacity(self.cells.len() + self.h as usize);
-        for y in 0..self.h {
-            for x in 0..self.w {
-                s.push(self.get(x, y).ch);
-            }
+        for row in self.cells.chunks(self.w.max(1) as usize) {
+            s.extend(row.iter().map(|c| c.ch));
             s.push('\n');
         }
         s
@@ -145,19 +143,30 @@ impl Frame {
             "<!doctype html><meta charset=utf-8><body style=\"background:#000;margin:0\">\
              <pre style=\"font:14px/1.0 'Cascadia Mono','DejaVu Sans Mono',monospace;margin:8px\">",
         );
-        for y in 0..self.h {
-            for x in 0..self.w {
-                let c = self.get(x, y);
-                let ch = match c.ch {
-                    '<' => "&lt;".to_string(),
-                    '>' => "&gt;".to_string(),
-                    '&' => "&amp;".to_string(),
-                    ch => ch.to_string(),
-                };
-                s.push_str(&format!(
-                    "<span style=\"color:#{:02x}{:02x}{:02x};background:#{:02x}{:02x}{:02x}\">{}</span>",
-                    c.fg.0, c.fg.1, c.fg.2, c.bg.0, c.bg.1, c.bg.2, ch
-                ));
+        // One span per cell (tools such as lum.js read them that way), written
+        // straight into the string with no allocation per cell.
+        s.reserve(self.cells.len() * 64);
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let hex = |s: &mut String, c: Rgb| {
+            for v in [c.0, c.1, c.2] {
+                s.push(HEX[(v >> 4) as usize] as char);
+                s.push(HEX[(v & 15) as usize] as char);
+            }
+        };
+        for row in self.cells.chunks(self.w.max(1) as usize) {
+            for c in row {
+                s.push_str("<span style=\"color:#");
+                hex(&mut s, c.fg);
+                s.push_str(";background:#");
+                hex(&mut s, c.bg);
+                s.push_str("\">");
+                match c.ch {
+                    '<' => s.push_str("&lt;"),
+                    '>' => s.push_str("&gt;"),
+                    '&' => s.push_str("&amp;"),
+                    ch => s.push(ch),
+                }
+                s.push_str("</span>");
             }
             s.push('\n');
         }

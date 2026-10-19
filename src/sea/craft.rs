@@ -780,15 +780,15 @@ impl Craft {
             if let Some((_, t)) = self.scene.things.at(pos).max_by_key(|(_, t)| self.scene.things.kind_of(t).layer) {
                 let k = self.scene.things.kind_of(t);
                 if k.layer >= Layer::Furniture {
-                    return Some(Cell::new(k.glyph, t.color.unwrap_or(k.fg), Rgb(40, 30, 20)));
+                    return Some(Cell::new(k.glyph, t.color.unwrap_or(k.fg), Rgb::BLACK));
                 }
             }
             let i = w.idx(x, y, z);
             let m = w.mats.get(w.mat[i]);
             match w.tile[i] {
                 Tile::Open => continue,
-                Tile::Wall => return Some(Cell::new(m.wall_glyph, m.fg, m.bg)),
-                _ => return Some(Cell::new(m.floor_glyphs.first().copied().unwrap_or('.'), m.fg, m.bg)),
+                Tile::Wall => return Some(Cell::new(m.wall_glyph, m.fg, Rgb::BLACK)),
+                _ => return Some(Cell::new(m.floor_glyphs.first().copied().unwrap_or('.'), m.fg, Rgb::BLACK)),
             }
         }
         None
@@ -813,12 +813,12 @@ fn level_for_volume(area: &[f32], keel: i32, vol: f32) -> f32 {
 
 /// Push apart crafts whose hulls overlap, with an inelastic knock, and
 /// report it in both crafts' events.
-pub fn collide(crafts: &mut [Craft]) {
+pub fn collide<C: std::borrow::BorrowMut<Craft>>(crafts: &mut [C]) {
     let n = crafts.len();
     for i in 0..n {
         for j in i + 1..n {
             let (left, right) = crafts.split_at_mut(j);
-            let (a, b) = (&mut left[i], &mut right[0]);
+            let (a, b) = (left[i].borrow_mut(), right[0].borrow_mut());
             let reach = 0.5 * (a.length.max(a.beam) + b.length.max(b.beam));
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             if dx * dx + dy * dy > reach * reach {
@@ -886,8 +886,13 @@ pub fn draw(frame: &mut Frame, area: Rect, view: &mut MapView, craft: &Craft, se
         for sx in 0..cols {
             let (wx, wy) = (x0 + sx, y0 + sy);
             let inside = wx >= 0 && wy >= 0 && wx < w.w && wy < w.h;
+            // Her own cells are hers to draw, except open water outside her
+            // hull on this level (alongside her narrow lower holds).
             if inside && craft.in_footprint(wx, wy) {
-                continue;
+                let here = Pos::new(wx, wy, z);
+                if craft.in_hull(here) || w.tile(here) != Tile::Open {
+                    continue;
+                }
             }
             // Her margin of simulated sea is drawn like the open sea beyond it,
             // unless something is in it there (a man overboard, wreckage).

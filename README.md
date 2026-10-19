@@ -11,7 +11,9 @@ A fast, game-agnostic engine for Dwarf-Fortress-style ASCII games in the termina
 cargo run --release --example sandbox
 ```
 
-Use Windows Terminal (or any true-colour terminal) with a font that has box-drawing characters, such as Cascadia Mono.
+Any terminal works; Windows Terminal is the target. Output is pure 7-bit ASCII by default, so any monospace font will do.
+
+In every game: **Ctrl+T** cycles the colour scheme (natural, terminal = your terminal's own 16 colours and background, phosphor, amber, paper), **Ctrl+G** switches between pure ASCII and extended (box-drawing) glyphs, and **Ctrl+L** repaints. `TACHYON_SCHEME=amber` and `TACHYON_CHARSET=extended` set them at start-up.
 
 ## Sandbox
 
@@ -82,22 +84,23 @@ Two scales. The **atlas** is the world map you author: each cell is a 32 x 32 m 
 cargo test --release
 ```
 
-`tests/physics.rs` checks the invariants: liquid is conserved, falls and levels; heat is conserved, including across sleeping chunks; field of view is symmetric; wood burns to ash and fire spreads; water on lava makes obsidian and steam. `tests/vessel.rs` checks rafts (floating, carrying passengers, stopping at banks, drifting downstream, conserving water) and the direction pad. `tests/worldbuild.rs` checks atlas and blueprint text round trips, stamping, and that generation is correct and deterministic. `tests/life.rs` checks bodies (bruises age and heal, bones break and lame, blades bleed and sever, heart wounds kill, small creatures reach only legs), blood stains, routes, finding food and water, routines, fighting back and fleeing, allies, hunting, drowning, burning and falling. `tests/elements.rs` checks flames in water, wind and rain, fog drifting, wind-driven fire, blast shielding, and firebolts.
+`tests/physics.rs` checks the invariants: liquid is conserved, falls and levels; heat is conserved, including across sleeping chunks; field of view is symmetric; wood burns to ash and fire spreads; water on lava makes obsidian and steam. `tests/vessel.rs` checks rafts (floating, carrying passengers, stopping at banks, drifting downstream, conserving water) and the direction pad. `tests/worldbuild.rs` checks atlas and blueprint text round trips, stamping, and that generation is correct and deterministic. `tests/life.rs` checks bodies (bruises age and heal, bones break and lame, blades bleed and sever, heart wounds kill, small creatures reach only legs), blood stains, routes, finding food and water, routines, fighting back and fleeing, allies, hunting, drowning, burning and falling. `tests/elements.rs` checks flames in water, wind and rain, fog drifting, wind-driven fire, blast shielding, and firebolts. `tests/display.rs` checks that everything the engine draws reaches the screen as 7-bit ASCII, and that the colour schemes keep hue and contrast.
 
 ## Architecture
 
+Folders are layers; each uses only those above it. Every module is also re-exported at the crate root (`tachyon::world`, `tachyon::craft`).
+
 ```
-color geom rng noise       utilities
-material tile world        the grid, structure-of-arrays, in 16x16x1 chunks that sleep when nothing changes
-things                     items, furniture, creatures (a `deck` kind can be stood on anywhere)
-vessel                     rafts and boats: float on the surface, carried by currents and wind, push a wake
-clock scene movement       time of day; Scene = world + things + clock + sim + weather + vessels + projectiles; walking, stairs, doors, swimming
-weather projectile         gusting, veering wind and rain; things in flight and explosions
-atlas blueprint worldgen   the authored world map; stampable structures; atlas -> 1 m world
-life/                      creatures: bodies of tissue layers and wounds, needs, minds with routines and grudges, pathfinding
-sim/                       fluid (+ flow field, springs and drains), gas (drifts with the wind), heat + fire, flames on things, light (cellular automata over awake chunks)
-view/                      renders a level into a Frame: looks down through open space and up at hillsides; lighting, field of view, memory, overlays
-frame input term app       cell buffer; the crossterm backend and main loop (the only terminal code)
+base/     color geom rng noise                 maths and utilities
+grid/     material tile world things clock     the grid (structure-of-arrays, 16x16x1 chunks that sleep), what is in it, time
+          movement vessel scene                walking, stairs, swimming; rafts; the Scene that ticks it all
+sim/      fluid gas heat light flames          physics over awake chunks
+          weather projectile                   wind and rain; things in flight and explosions
+life/     body needs mind ai path species      creatures
+sea/      field craft ballistics sight         the sea as fields; ships posed on it; round shot; seeing over the horizon
+make/     atlas blueprint worldgen lang        authored world maps and structures; generated languages and names
+draw/     frame view ui display                cell pictures of the world and its screens; ASCII folding and colour schemes
+backend/  term input app                       the terminal, input events, the main loop (the only terminal code)
 ```
 
-A game implements `app::Game` (tick, draw into a `Frame`, handle keys). Because only `term` and `app` touch the terminal, another backend (web canvas, native window) only has to display a `Frame` and send key events.
+A game implements `app::Game` (tick, draw into a `Frame`, handle keys). Because only `backend/` touches the terminal, another backend (web canvas, native window) only has to display a `Frame` and send key events. The loop redraws only after input or a tick, so an idle game costs almost nothing.
