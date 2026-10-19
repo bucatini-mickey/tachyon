@@ -3,7 +3,7 @@
 Mickey's game-agnostic engine for Dwarf-Fortress-style games that are real terminal games: pure ASCII on screen, real per-cell physics underneath, fast above all. Started 2026-10-07. Dated session notes are in `docs/HISTORY.md`.
 
 ## Goal
-- One engine, several games: **Broadside** (naval, `games/broadside`; the Python original in `../Broadside` is inspiration only), a **gothic** Morrowind-like RPG, a **desert** Mad-Max-like wanderer, maybe a **spy** game. The engine knows about none of them.
+- One engine, several games: **Broadside** (naval, its own repo at `../Broadside`, depending on this one by path; the Python original is in `../Broadside/legacy`), a **gothic** Morrowind-like RPG, a **desert** Mad-Max-like wanderer, maybe a **spy** game. The engine knows about none of them.
 - DF-style: a 3D grid of 1 m cells, shown one z-level at a time. A cell is drawn as its most important thing.
 - Real per-cell physics: liquid in 64ths, heat, gas, light, fire; walls hide what is behind them.
 
@@ -29,18 +29,17 @@ src/
   make/     atlas blueprint worldgen lang        authored world map + structures (text formats); generated names
   draw/     frame view/ ui display               cell buffer (+ to_html/to_text); map view; widgets; ASCII + colour schemes
   backend/  term input app                       diffed terminal writer; input events; Game trait + main loop
-games/broadside/   the naval game (workspace member)
 examples/          sandbox (test map), editor (atlas + 1 m builder), seaway (two brigs on a modelled sea)
 tests/             one file per system; display.rs checks that what the engine draws reaches the screen as ASCII
 ```
 
 ## Who works where (parallel Claude sessions)
-- "New engine vs. Broadside project": `games/broadside/`, `src/sea/`, `src/draw/ui.rs`, `src/make/lang.rs`, the pressure pass in `src/sim/fluid.rs`, `examples/seaway`.
+- Broadside sessions: `../Broadside`, `src/sea/`, `src/draw/ui.rs`, `src/make/lang.rs`, the pressure pass in `src/sim/fluid.rs`, `examples/seaway`.
 - "Tachyon engine setup": `life/`, `examples/sandbox`, README.
 - Message the owner before editing their files; append rather than rewrite.
 
 ## Checks
-- `cargo test --release -p tachyon` (engine), `cargo test --release --workspace` (with Broadside).
+- `cargo test --release -p tachyon` (engine), `cargo test --release` in `../Broadside` (the game).
 - `cargo run --release --example sandbox -- --bench 600`: ~4.2 ms/tick on 160x100x12 (fluid ~1.9, heat ~2.2), draw ~1.6 ms.
 - Snapshots: `--snapshot out.html` writes HTML + `.txt`; the sandbox applies `Display::from_env()`, so `TACHYON_SCHEME=terminal` shows that scheme. `snaps/` is gitignored; `../.claude/lum.js` reads a snapshot's brightness.
 - Windows Terminal is the target. Running examples lock their .exe; close them before rebuilding.

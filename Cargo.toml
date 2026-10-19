@@ -19,6 +19,6 @@ opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
 
-# Games built on the engine live in games/ and share its build.
+# Games live in their own repos beside this one (../Broadside) and depend on it by path.
 [workspace]
-members = [".", "games/broadside"]
+members = ["."]

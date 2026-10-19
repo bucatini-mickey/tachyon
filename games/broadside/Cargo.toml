@@ -1,8 +1,0 @@
-[package]
-name = "broadside"
-version = "0.1.0"
-edition = "2021"
-description = "Napoleonic naval command, Dwarf Fortress style, on the Tachyon engine"
-
-[dependencies]
-tachyon = { path = "../.." }
