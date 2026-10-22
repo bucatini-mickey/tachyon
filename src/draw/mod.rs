@@ -4,5 +4,6 @@
 
 pub mod display;
 pub mod frame;
+pub mod palette;
 pub mod ui;
 pub mod view;

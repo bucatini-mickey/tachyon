@@ -27,18 +27,17 @@ pub struct Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Theme {
-            bg: Rgb(11, 13, 18),
-            frame: Rgb(70, 86, 110),
-            title: Rgb(236, 222, 180),
-            text: Rgb(206, 206, 212),
-            dim: Rgb(126, 132, 146),
-            pick_bg: Rgb(34, 48, 70),
-            pick_fg: Rgb(255, 240, 190),
-            good: Rgb(140, 200, 120),
-            warn: Rgb(232, 196, 96),
-            bad: Rgb(232, 96, 80),
-        }
+        use crate::palette::*;
+        Theme::slots(INK, SLATE, CREAM, SILVER, GREY, DEEP, CREAM, GREEN, GOLD, RUBRIC)
+    }
+}
+
+impl Theme {
+    /// A theme from palette slots, in field order.
+    #[allow(clippy::too_many_arguments)]
+    pub fn slots(bg: u8, frame: u8, title: u8, text: u8, dim: u8, pick_bg: u8, pick_fg: u8, good: u8, warn: u8, bad: u8) -> Theme {
+        let c = |i: u8| crate::palette::PALETTE[i as usize % 16];
+        Theme { bg: c(bg), frame: c(frame), title: c(title), text: c(text), dim: c(dim), pick_bg: c(pick_bg), pick_fg: c(pick_fg), good: c(good), warn: c(warn), bad: c(bad) }
     }
 }
 

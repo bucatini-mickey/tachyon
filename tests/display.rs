@@ -83,3 +83,13 @@ fn monochrome_schemes_keep_dim_things_visible() {
         assert!(gap > 30.0, "{}: dim text too close to the background ({gap})", scheme.name());
     }
 }
+
+#[test]
+fn palette_scheme_is_the_default_and_emits_only_palette_inks() {
+    let d = Display::default();
+    assert_eq!(d.scheme, Scheme::Palette);
+    for c in [Rgb(1, 2, 3), Rgb(200, 90, 40), Rgb(77, 99, 130), Rgb(255, 255, 255)] {
+        let Ink::Rgb(o) = d.ink(c, false) else { panic!() };
+        assert!(tachyon::palette::PALETTE.contains(&o));
+    }
+}

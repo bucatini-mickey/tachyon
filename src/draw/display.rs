@@ -7,7 +7,8 @@
 //!   the game is a true terminal game in any font, and no glyph can ever be
 //!   drawn two columns wide. `Extended` sends box-drawing and CP437 glyphs
 //!   as they are.
-//! - **Colour scheme.** `Natural` keeps the game's colours. `Terminal` uses only the
+//! - **Colour scheme.** `Palette` (the default) snaps every colour to the
+//!   engine's 16 fixed inks ([`crate::palette`]). `Natural` keeps the game's colours. `Terminal` uses only the
 //!   terminal's own 16 colours and its default background, so the game takes
 //!   on whatever colour scheme the terminal has. `Phosphor`, `Amber` and
 //!   `Paper` recolour everything from its brightness, like old monitors and
@@ -17,7 +18,7 @@
 //! colours are sent as the nearest of the 256 xterm colours.
 //!
 //! Set from the environment by [`Display::from_env`]: `TACHYON_SCHEME`
-//! (natural, terminal, phosphor, amber, paper) and `TACHYON_CHARSET` (ascii,
+//! (palette, natural, terminal, phosphor, amber, paper) and `TACHYON_CHARSET` (ascii,
 //! extended). In any game, Ctrl+T cycles the colour scheme and Ctrl+G the charset.
 
 use crate::color::Rgb;
@@ -33,6 +34,7 @@ pub enum Charset {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Scheme {
     #[default]
+    Palette,
     Natural,
     Terminal,
     Phosphor,
@@ -41,10 +43,11 @@ pub enum Scheme {
 }
 
 impl Scheme {
-    pub const ALL: [Scheme; 5] = [Scheme::Natural, Scheme::Terminal, Scheme::Phosphor, Scheme::Amber, Scheme::Paper];
+    pub const ALL: [Scheme; 6] = [Scheme::Palette, Scheme::Natural, Scheme::Terminal, Scheme::Phosphor, Scheme::Amber, Scheme::Paper];
 
     pub fn name(self) -> &'static str {
         match self {
+            Scheme::Palette => "palette",
             Scheme::Natural => "natural",
             Scheme::Terminal => "terminal",
             Scheme::Phosphor => "phosphor",
@@ -95,7 +98,7 @@ pub struct Display {
 
 impl Default for Display {
     fn default() -> Self {
-        Display { charset: Charset::Ascii, scheme: Scheme::Natural, truecolor: true }
+        Display { charset: Charset::Ascii, scheme: Scheme::Palette, truecolor: true }
     }
 }
 
@@ -127,6 +130,10 @@ impl Display {
                 } else {
                     Ink::Xterm(xterm256(c))
                 }
+            }
+            Scheme::Palette => {
+                let out = crate::palette::PALETTE[crate::palette::nearest(c)];
+                if self.truecolor { Ink::Rgb(out) } else { Ink::Xterm(xterm256(out)) }
             }
             Scheme::Terminal => ansi16(c, bg),
             t => {

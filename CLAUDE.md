@@ -10,7 +10,7 @@ Mickey's game-agnostic engine for Dwarf-Fortress-style games that are real termi
 ## Decisions
 - **Rust, crossterm the only dependency.** Mickey knows Python and is learning Rust: explain idioms when they come up. Barebones, easy to build, Linux-friendly; WASM/phones later.
 - **Terminal-native output.** Games draw into `frame::Frame` with any glyphs and 24-bit colours; `display::Display` decides what reaches the screen: `Charset::Ascii` (default) folds everything to 7-bit ASCII, `Scheme` picks colours (`natural`, `terminal` = the terminal's own 16 colours and background, `phosphor`, `amber`, `paper`). Ctrl+T / Ctrl+G cycle them in any game; `TACHYON_SCHEME` / `TACHYON_CHARSET` set them. Only `backend/` touches crossterm.
-- Backgrounds carry meaning only (classic roguelike): `MapView` draws floors and walls as coloured glyphs on black; liquid, fire, gas, blood, items on furniture, highlights and overlays colour the background. `MapView::fill = true` restores the old filled-tile look.
+- Backgrounds carry meaning only (classic roguelike): `MapView` draws floors and walls as coloured glyphs on black; liquid, fire, gas, blood, items on furniture, highlights and overlays colour the background.
 - The main loop draws only after input or a tick (plus a 100 ms idle refresh), so a paused game costs next to nothing.
 - World storage is structure-of-arrays in 16x16x1 chunks; only awake chunks simulate (`world::Wake`), a slow sweep wakes sleepers.
 - Materials (liquids and gases too) live in one registry; `Materials::standard()` is an optional starter set.

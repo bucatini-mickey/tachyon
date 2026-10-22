@@ -42,7 +42,7 @@ pub mod sim;
 
 pub use backend::{app, input, term};
 pub use base::{color, geom, noise, rng};
-pub use draw::{display, frame, ui, view};
+pub use draw::{display, frame, palette, ui, view};
 pub use grid::{clock, material, movement, scene, things, tile, vessel, world};
 pub use make::{atlas, blueprint, lang, worldgen};
 pub use sea::{ballistics, craft, sight};
