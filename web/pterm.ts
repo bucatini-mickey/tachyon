@@ -42,7 +42,7 @@ export class Grid {
 	rows = 0;
 	cells: Cell[] = [];
 	/** Hit regions for this frame; later ones sit on top. */
-	hits: { r: Rect; fn: () => void }[] = [];
+	hits: { r: Rect; fn: (x: number, y: number) => void }[] = [];
 
 	resize(cols: number, rows: number) {
 		this.cols = cols;
@@ -102,7 +102,8 @@ export class Grid {
 		if (title && w > 4) this.text(x + 2, y, ` ${title} `.slice(0, w - 4), titleFg, bg);
 	}
 
-	hit(r: Rect, fn: () => void) {
+	/** Register a tap region; `fn` gets the cell tapped. */
+	hit(r: Rect, fn: (x: number, y: number) => void) {
 		this.hits.push({ r, fn });
 	}
 
@@ -110,7 +111,7 @@ export class Grid {
 	hitAt(x: number, y: number): (() => void) | null {
 		for (let i = this.hits.length - 1; i >= 0; i--) {
 			const { r, fn } = this.hits[i];
-			if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) return fn;
+			if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) return () => fn(x, y);
 		}
 		return null;
 	}
@@ -160,7 +161,7 @@ export class Term extends Grid {
 		doc.documentElement.style.overflow = 'hidden';
 		doc.body.style.cssText = 'margin:0;overflow:hidden;overscroll-behavior:none;';
 		this.pre = doc.createElement('pre');
-		this.pre.style.cssText = 'margin:0;font-family:"Courier New",Consolas,Menlo,monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
+		this.pre.style.cssText = 'margin:0;font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
 		host.appendChild(this.pre);
 		this.input = doc.createElement('input');
 		this.input.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;';
