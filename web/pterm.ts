@@ -89,20 +89,20 @@ export class Grid {
 			}
 	}
 
-	/** An ASCII box: + - | corners, optional title in the top rule. */
-	box(r: Rect, fg: number, bg: number, title = '', titleFg = fg) {
+	/** A box with an optional title in the top rule: plain ASCII, or single or double CP437 lines. */
+	box(r: Rect, fg: number, bg: number, title = '', titleFg = fg, style: 'ascii' | 'single' | 'double' = 'ascii') {
 		const { x, y, w, h } = r;
 		if (w < 2 || h < 2) return;
-		this.set(x, y, '+', fg, bg);
-		this.set(x + w - 1, y, '+', fg, bg);
-		this.set(x, y + h - 1, '+', fg, bg);
-		this.set(x + w - 1, y + h - 1, '+', fg, bg);
-		for (let i = 1; i < w - 1; i++) { this.set(x + i, y, '-', fg, bg); this.set(x + i, y + h - 1, '-', fg, bg); }
-		for (let j = 1; j < h - 1; j++) { this.set(x, y + j, '|', fg, bg); this.set(x + w - 1, y + j, '|', fg, bg); }
+		const [tl, tr, bl, br, hz, vt] = style === 'double' ? ['╔', '╗', '╚', '╝', '═', '║'] : style === 'single' ? ['┌', '┐', '└', '┘', '─', '│'] : ['+', '+', '+', '+', '-', '|'];
+		this.set(x, y, tl, fg, bg);
+		this.set(x + w - 1, y, tr, fg, bg);
+		this.set(x, y + h - 1, bl, fg, bg);
+		this.set(x + w - 1, y + h - 1, br, fg, bg);
+		for (let i = 1; i < w - 1; i++) { this.set(x + i, y, hz, fg, bg); this.set(x + i, y + h - 1, hz, fg, bg); }
+		for (let j = 1; j < h - 1; j++) { this.set(x, y + j, vt, fg, bg); this.set(x + w - 1, y + j, vt, fg, bg); }
 		if (title && w > 4) this.text(x + 2, y, ` ${title} `.slice(0, w - 4), titleFg, bg);
 	}
 
-	/** Register a tap region; `fn` gets the cell tapped. */
 	hit(r: Rect, fn: (x: number, y: number) => void) {
 		this.hits.push({ r, fn });
 	}
