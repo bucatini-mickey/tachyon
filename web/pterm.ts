@@ -193,6 +193,10 @@ export class Term extends Grid {
 		host.style.cssText = 'position:fixed;inset:0;overflow:hidden;margin:0;padding:0;display:flex;justify-content:center;align-items:flex-start;touch-action:manipulation;';
 		doc.documentElement.style.overflow = 'hidden';
 		doc.body.style.cssText = 'margin:0;overflow:hidden;overscroll-behavior:none;';
+		// Rows are blocks and runs fill them, so a ground colour covers the whole line with no seams.
+		const css = doc.createElement('style');
+		css.textContent = '.pt-row{display:block}.pt-row>span{display:inline-block;height:100%;vertical-align:top}';
+		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
 		this.pre.style.cssText = 'margin:0;font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
 		host.appendChild(this.pre);
@@ -264,6 +268,7 @@ export class Term extends Grid {
 		const rows = Math.max(10, Math.floor(H / this.lh));
 		this.pre.style.fontSize = `${font}px`;
 		this.pre.style.lineHeight = `${this.lh}px`;
+		this.rowEls = [];
 		this.pre.style.width = `${cols * this.cw}px`;
 		this.pre.style.height = `${rows * this.lh}px`;
 		this.resize(cols, rows);
@@ -296,8 +301,10 @@ export class Term extends Grid {
 			this.rowHtml = [];
 			for (let y = 0; y < this.rows; y++) {
 				const el = doc.createElement('span');
+				el.className = 'pt-row';
+				el.style.height = `${this.lh}px`;
 				this.rowEls.push(el);
-				this.pre.append(el, '\n');
+				this.pre.append(el);
 			}
 		}
 		let n = 0;
