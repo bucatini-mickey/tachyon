@@ -149,6 +149,8 @@ export interface TermOptions {
 	cols?: number;
 	/** Largest font in px (so desktops do not get giant letters). */
 	maxFont?: number;
+	/** The grid is at least this many rows tall (default 24); on a wide, short screen the font shrinks to fit them. */
+	rows?: number;
 	/** Called when the app should redraw (size change, entry typed, `draw()`). */
 	onDraw: (t: Term) => void;
 	/** Desktop keys (PageUp, Escape...) not typed into the entry field. */
@@ -260,8 +262,8 @@ export class Term extends Grid {
 		const ratio = probe.getBoundingClientRect().width / 20 / 100;
 		probe.remove();
 		let font = Math.min(this.opts.maxFont ?? 24, Math.floor(W / (want * ratio)));
-		// On a wide, short screen the height matters too: keep at least 24 rows.
-		font = Math.max(8, Math.min(font, Math.floor(H / (24 * 1.2))));
+		// On a wide, short screen the height matters too: keep at least `rows` rows.
+		font = Math.max(8, Math.min(font, Math.floor(H / ((this.opts.rows ?? 24) * 1.2))));
 		this.cw = font * ratio;
 		this.lh = Math.round(font * 1.2);
 		const cols = Math.max(20, Math.floor(W / this.cw));
