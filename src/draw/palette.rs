@@ -49,3 +49,29 @@ pub fn nearest(c: Rgb) -> usize {
     };
     (0..16).min_by_key(|&i| d(PALETTE[i])).unwrap()
 }
+
+/// Darker steps per ink: how much of the ink each keeps, darkest first. The
+/// web terminal (`web/pterm.ts`, `SHADES`) uses the same steps, so ink `i`
+/// step `s` is index `16 + i * 4 + s` there.
+pub const SHADES: [f32; 4] = [0.22, 0.4, 0.58, 0.78];
+
+/// Ink `ink` at shade step `step` (0 darkest); a step past the last is the ink itself.
+pub fn shade(ink: u8, step: usize) -> Rgb {
+    let c = PALETTE[ink as usize % 16];
+    match SHADES.get(step) {
+        Some(&k) => Rgb((c.0 as f32 * k).round() as u8, (c.1 as f32 * k).round() as u8, (c.2 as f32 * k).round() as u8),
+        None => c,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shades_darken_toward_black() {
+        assert_eq!(shade(GOLD, 4), PALETTE[GOLD as usize]);
+        assert_eq!(shade(CREAM, 0), Rgb(56, 53, 42));
+        assert!(shade(GOLD, 0).0 < shade(GOLD, 3).0);
+    }
+}

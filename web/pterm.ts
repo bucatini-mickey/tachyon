@@ -2,8 +2,10 @@
  * pterm.ts - Tachyon's web pseudo-terminal.
  *
  * One monospace <pre> of cells. A cell is a glyph with a foreground and a
- * background, each an index into a 16-ink palette (same idea as the Rust
- * engine's `draw::palette`). Nothing else is drawn: no images, no HTML
+ * background, each an index into the palette: 16 inks, then SHADES darker
+ * steps of each ink (the same table as the Rust engine's `draw::palette`), so
+ * light can fall off smoothly without leaving the ink's hue. Nothing else is
+ * drawn: no images, no HTML
  * buttons, no proportional text. The grid is sized to fill the viewport
  * exactly, so the page never scrolls.
  *
@@ -22,6 +24,23 @@ export const PALETTE: Palette = [
 	'#0b0d12', '#262c3a', '#46566e', '#7e8492', '#cecfd4', '#fff0be', '#e8c460', '#e68c3c',
 	'#e86050', '#822822', '#8cc878', '#2e6038', '#6096e6', '#243874', '#a064be', '#6e4c2c'
 ];
+
+/** Darker steps per ink: how much of the ink each keeps, darkest first. Mirrors `palette::SHADES`. */
+export const SHADES = [0.22, 0.4, 0.58, 0.78];
+
+/** The index of an ink's shade step: step 0 is the darkest; SHADES.length or more is the ink itself. */
+export const shade = (ink: number, step: number): number => (step >= SHADES.length ? ink : 16 + ink * SHADES.length + Math.max(0, step));
+
+/** The 16 inks followed by their shade steps (a palette already expanded comes back as it is). */
+export function expand(p: Palette): Palette {
+	if (p.length !== 16) return p;
+	const out = [...p];
+	for (const hex of p) {
+		const rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+		for (const k of SHADES) out.push('#' + rgb.map((v) => Math.round(v * k).toString(16).padStart(2, '0')).join(''));
+	}
+	return out;
+}
 
 export interface Cell {
 	ch: string;
@@ -139,7 +158,21 @@ export interface TermOptions {
 const esc = (c: string) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c);
 
 export class Term extends Grid {
-	palette: Palette;
+	private raw: Palette | null = null;
+	private pal: Palette = [];
+	/** Each row's last written HTML, so a flush only touches the rows that changed. */
+	private rowHtml: string[] = [];
+	private rowEls: HTMLElement[] = [];
+	/** The last frame: ms in the app's drawing, ms writing the DOM, and rows rewritten. */
+	stats = { draw: 0, flush: 0, rows: 0 };
+	/** The palette in use. Set 16 inks; their shade steps are added. */
+	get palette(): Palette { return this.pal; }
+	set palette(p: Palette) {
+		if (p === this.raw) return;
+		this.raw = p;
+		this.pal = expand(p);
+		this.rowHtml = [];
+	}
 	readonly pre: HTMLPreElement;
 	private input: HTMLInputElement;
 	private opts: TermOptions;
@@ -244,29 +277,52 @@ export class Term extends Grid {
 		const win = this.pre.ownerDocument.defaultView!;
 		win.requestAnimationFrame(() => {
 			this.queued = false;
+			const t0 = performance.now();
 			this.opts.onDraw(this);
+			const t1 = performance.now();
 			this.flush();
+			this.stats.draw = t1 - t0;
+			this.stats.flush = performance.now() - t1;
 		});
 	}
 
-	/** Write the cells to the <pre> as runs of one colour pair. */
+	/** Write the cells to the <pre> as runs of one colour pair, rewriting only the rows that changed. */
 	flush() {
 		const p = this.palette;
+		if (this.rowEls.length !== this.rows) {
+			const doc = this.pre.ownerDocument;
+			this.pre.textContent = '';
+			this.rowEls = [];
+			this.rowHtml = [];
+			for (let y = 0; y < this.rows; y++) {
+				const el = doc.createElement('span');
+				this.rowEls.push(el);
+				this.pre.append(el, '\n');
+			}
+		}
+		let n = 0;
 		const out: string[] = [];
 		for (let y = 0; y < this.rows; y++) {
+			out.length = 0;
 			let cur = -1;
 			for (let x = 0; x < this.cols; x++) {
 				const c = this.cells[y * this.cols + x];
-				const key = c.fg * 16 + c.bg;
+				const key = c.fg * 256 + c.bg;
 				if (key !== cur) {
 					if (cur >= 0) out.push('</span>');
-					out.push(`<span style="color:${p[c.fg]};background:${p[c.bg]}">`);
+					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${p[c.bg] ?? p[0]}">`);
 					cur = key;
 				}
 				out.push(esc(c.ch));
 			}
-			out.push('</span>\n');
+			out.push('</span>');
+			const html = out.join('');
+			if (html !== this.rowHtml[y]) {
+				this.rowHtml[y] = html;
+				this.rowEls[y].innerHTML = html;
+				n++;
+			}
 		}
-		this.pre.innerHTML = out.join('');
+		this.stats.rows = n;
 	}
 }
