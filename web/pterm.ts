@@ -267,6 +267,13 @@ export class Term extends Grid {
 		this.draw();
 	}
 
+	/** Ask for at least this many columns (a screen that wants a margin round its page); refits when it changes. */
+	setCols(cols: number) {
+		if ((this.opts.cols ?? 44) === cols) return;
+		this.opts.cols = cols;
+		this.fit();
+	}
+
 	/** Measure a glyph, pick the font so `cols` columns fit the width, then count rows to fill the height. */
 	fit() {
 		const doc = this.pre.ownerDocument;
