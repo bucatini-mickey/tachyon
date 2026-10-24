@@ -214,7 +214,7 @@ export class Term extends Grid {
 		// A glyph outside ASCII sits in a box exactly one cell wide (two for a wide one), centred, so a
 		// fallback font of another width can never push the rest of the line along.
 		css.textContent = '.pt-row{display:block}.pt-row>span{display:inline-block;height:100%;vertical-align:top}'
-			+ '.pt-row i{display:inline-block;width:var(--pt-cw);text-align:center;font-style:normal;overflow:hidden;vertical-align:top}'
+			+ '.pt-row i{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-style:normal;overflow:hidden;vertical-align:top}'
 			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}';
 		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
@@ -349,6 +349,11 @@ export class Term extends Grid {
 					cur = key;
 				}
 				if (c.wide) { out.push(`<i class="w">${esc(c.ch)}</i>`); x++; }
+				// Half blocks are painted as two exact halves of colour, so pixel pictures have no seams.
+				else if (c.ch === '▀' || c.ch === '▄') {
+					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], p[c.bg] ?? p[0]] : [p[c.bg] ?? p[0], p[c.fg] ?? p[4]];
+					out.push(`<i style="background:linear-gradient(${hi} 50%,${lo} 50%)"> </i>`);
+				}
 				else if (c.ch.charCodeAt(0) > 126) out.push(`<i>${c.ch}</i>`);
 				else out.push(esc(c.ch));
 			}
