@@ -208,6 +208,9 @@ export class Term extends Grid {
 		const doc = host.ownerDocument;
 		host.style.cssText = 'position:fixed;inset:0;overflow:hidden;margin:0;padding:0;display:flex;justify-content:center;align-items:flex-start;touch-action:manipulation;';
 		doc.documentElement.style.overflow = 'hidden';
+		// Phones enlarge text they think is too small (font boosting); in a grid that breaks every line.
+		doc.documentElement.style.setProperty('-webkit-text-size-adjust', '100%');
+		doc.documentElement.style.setProperty('text-size-adjust', '100%');
 		doc.body.style.cssText = 'margin:0;overflow:hidden;overscroll-behavior:none;';
 		// Rows are blocks and runs fill them, so a ground colour covers the whole line with no seams.
 		const css = doc.createElement('style');
