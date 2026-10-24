@@ -46,6 +46,8 @@ export interface Cell {
 	ch: string;
 	fg: number;
 	bg: number;
+	/** The glyph is centred across this cell and the next (whose own glyph is not drawn). */
+	wide?: boolean;
 }
 
 export interface Rect {
@@ -71,16 +73,28 @@ export class Grid {
 	}
 
 	clear(fg = 4, bg = 0) {
-		for (const c of this.cells) { c.ch = ' '; c.fg = fg; c.bg = bg; }
+		for (const c of this.cells) { c.ch = ' '; c.fg = fg; c.bg = bg; c.wide = false; }
 		this.hits = [];
 	}
 
 	set(x: number, y: number, ch: string, fg: number, bg?: number) {
 		if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return;
-		const c = this.cells[y * this.cols + x];
+		const i = y * this.cols + x;
+		const c = this.cells[i];
+		// Writing into either half of a wide glyph splits it back into two ordinary cells.
+		if (c.wide && x + 1 < this.cols) { c.wide = false; this.cells[i + 1].ch = ' '; }
+		if (x > 0 && this.cells[i - 1].wide) { this.cells[i - 1].wide = false; }
 		c.ch = ch;
 		c.fg = fg;
 		if (bg !== undefined) c.bg = bg;
+	}
+
+	/** A glyph centred across two cells (x and x+1), so a square tile of two columns holds it in its middle. */
+	setWide(x: number, y: number, ch: string, fg: number, bg?: number) {
+		if (x < 0 || y < 0 || x + 1 >= this.cols || y >= this.rows) { this.set(x, y, ch, fg, bg); return; }
+		this.set(x, y, ch, fg, bg);
+		this.set(x + 1, y, '', fg, bg);
+		this.cells[y * this.cols + x].wide = true;
 	}
 
 	get(x: number, y: number): Cell | undefined {
@@ -197,7 +211,11 @@ export class Term extends Grid {
 		doc.body.style.cssText = 'margin:0;overflow:hidden;overscroll-behavior:none;';
 		// Rows are blocks and runs fill them, so a ground colour covers the whole line with no seams.
 		const css = doc.createElement('style');
-		css.textContent = '.pt-row{display:block}.pt-row>span{display:inline-block;height:100%;vertical-align:top}';
+		// A glyph outside ASCII sits in a box exactly one cell wide (two for a wide one), centred, so a
+		// fallback font of another width can never push the rest of the line along.
+		css.textContent = '.pt-row{display:block}.pt-row>span{display:inline-block;height:100%;vertical-align:top}'
+			+ '.pt-row i{display:inline-block;width:var(--pt-cw);text-align:center;font-style:normal;overflow:hidden;vertical-align:top}'
+			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}';
 		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
 		this.pre.style.cssText = 'margin:0;font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
@@ -272,6 +290,7 @@ export class Term extends Grid {
 		this.pre.style.lineHeight = `${this.lh}px`;
 		this.rowEls = [];
 		this.pre.style.width = `${cols * this.cw}px`;
+		this.pre.style.setProperty('--pt-cw', `${this.cw}px`);
 		this.pre.style.height = `${rows * this.lh}px`;
 		this.resize(cols, rows);
 		this.draw();
@@ -322,7 +341,9 @@ export class Term extends Grid {
 					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${p[c.bg] ?? p[0]}">`);
 					cur = key;
 				}
-				out.push(esc(c.ch));
+				if (c.wide) { out.push(`<i class="w">${esc(c.ch)}</i>`); x++; }
+				else if (c.ch.charCodeAt(0) > 126) out.push(`<i>${c.ch}</i>`);
+				else out.push(esc(c.ch));
 			}
 			out.push('</span>');
 			const html = out.join('');
