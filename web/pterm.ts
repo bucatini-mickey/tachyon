@@ -200,6 +200,9 @@ export class Term extends Grid {
 	/** Whether the hidden input is taking text. */
 	editing = false;
 	private entryDone: ((v: string | null) => void) | null = null;
+	/** Where the last tap fell, and the field it opened for typing. */
+	private tapAt: { x: number; y: number } | null = null;
+	private entryAt: Rect | null = null;
 
 	constructor(host: HTMLElement, opts: TermOptions) {
 		super();
@@ -236,10 +239,18 @@ export class Term extends Grid {
 		});
 		this.pre.addEventListener('pointerdown', (ev) => {
 			const b = this.pre.getBoundingClientRect();
-			const fn = this.hitAt(Math.floor((ev.clientX - b.left) / this.cw), Math.floor((ev.clientY - b.top) / this.lh));
+			const x = Math.floor((ev.clientX - b.left) / this.cw), y = Math.floor((ev.clientY - b.top) / this.lh);
+			const fn = this.hitAt(x, y);
 			ev.preventDefault();
+			// A tap on the field being typed in keeps typing; a tap anywhere else ends it (keeping what was
+			// typed) and lets the keyboard go. Left open, every later tap would bring the keyboard back up.
+			if (this.editing) {
+				const r = this.entryAt;
+				if (r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { this.input.focus(); return; }
+				this.endEntry(true);
+			} else if (doc.activeElement === this.input) this.input.blur();
+			this.tapAt = { x, y };
 			if (fn) fn();
-			else if (this.editing) this.input.focus();
 		});
 		doc.addEventListener('keydown', (ev) => {
 			if (ev.target === this.input || ev.ctrlKey || ev.metaKey || ev.altKey) return;
@@ -256,6 +267,8 @@ export class Term extends Grid {
 		this.input.maxLength = maxLen;
 		this.editing = true;
 		this.entryDone = done;
+		const t = this.tapAt;
+		this.entryAt = t ? this.hits.slice().reverse().find(({ r }) => t.x >= r.x && t.x < r.x + r.w && t.y >= r.y && t.y < r.y + r.h)?.r ?? null : null;
 		this.input.focus();
 		this.draw();
 	}
