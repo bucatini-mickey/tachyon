@@ -48,6 +48,8 @@ export interface Cell {
 	bg: number;
 	/** The glyph is centred across this cell and the next (whose own glyph is not drawn). */
 	wide?: boolean;
+	/** The glyph is drawn bold (an initial, a heading's first letter); set with Grid.bold, cleared by the next set. */
+	bold?: boolean;
 }
 
 export interface Rect {
@@ -73,7 +75,7 @@ export class Grid {
 	}
 
 	clear(fg = 4, bg = 0) {
-		for (const c of this.cells) { c.ch = ' '; c.fg = fg; c.bg = bg; c.wide = false; }
+		for (const c of this.cells) { c.ch = ' '; c.fg = fg; c.bg = bg; c.wide = false; c.bold = false; }
 		this.hits = [];
 	}
 
@@ -86,7 +88,14 @@ export class Grid {
 		if (x > 0 && this.cells[i - 1].wide) { this.cells[i - 1].wide = false; }
 		c.ch = ch;
 		c.fg = fg;
+		c.bold = false;
 		if (bg !== undefined) c.bg = bg;
+	}
+
+	/** Draw the glyph already at (x, y) bold. */
+	bold(x: number, y: number) {
+		const c = this.get(x, y);
+		if (c) c.bold = true;
 	}
 
 	/** A glyph centred across two cells (x and x+1), so a square tile of two columns holds it in its middle. */
@@ -221,6 +230,8 @@ export class Term extends Grid {
 		// fallback font of another width can never push the rest of the line along.
 		css.textContent = '.pt-row{display:block}.pt-row>span{display:inline-block;height:100%;vertical-align:top}'
 			+ '.pt-row i{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-style:normal;overflow:hidden;vertical-align:top}'
+			// (a bold glyph keeps to its cell, so the row stays on the grid)
+			+ '.pt-row b{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-weight:900;vertical-align:top}'
 			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}';
 		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
@@ -370,6 +381,7 @@ export class Term extends Grid {
 					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], p[c.bg] ?? p[0]] : [p[c.bg] ?? p[0], p[c.fg] ?? p[4]];
 					out.push(`<i style="background:linear-gradient(${hi} 50%,${lo} 50%)"> </i>`);
 				}
+				else if (c.bold) out.push(`<b>${esc(c.ch)}</b>`);
 				else if (c.ch.charCodeAt(0) > 126) out.push(`<i>${c.ch}</i>`);
 				else out.push(esc(c.ch));
 			}
