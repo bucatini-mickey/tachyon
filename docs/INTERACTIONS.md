@@ -33,7 +33,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | No wind indoors / under a roof | tested-pass | gas.rs, light.rs sky | elements.rs `no_rain_or_wind_under_a_roof` |
 | Gas blocks sight above `opacity` | tested-pass (partly) | material.rs, sight | sight.rs `haze_fog_and_smoke_wash_her_out` (sea-scale only; per-cell opacity untested) |
 | Gas conserved in diffusion | tested-pass | gas.rs | interactions.rs `gas_is_conserved_in_a_sealed_room` |
-| Gas sealed by ceilings / pools under them | impl-untested | gas.rs | |
+| Gas sealed by ceilings / pools under them | tested-pass | gas.rs | interactions.rs `smoke_rises_decays_and_pools_under_a_ceiling` |
 | Steam from boiling water | tested-pass | heat.rs `phase` | physics.rs lava+water test checks steam |
 | Steam condenses back to water on cold surfaces | missing | | no gas-to-liquid phase |
 | Gas displaces / bubbles up through liquid | missing | gas.rs, fluid.rs | |
@@ -50,10 +50,10 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Hot air rises | impl-untested | heat.rs | |
 | Sky drift to outdoor temp, deep-earth sink | impl-untested | heat.rs | |
 | Ice melts to water | tested-pass | heat.rs `phase` | interactions.rs `ice_melts_to_water_when_warm` |
-| Water freezes to ice | impl-untested | heat.rs `phase` | |
+| Water freezes to ice | tested-pass | heat.rs `phase` | interactions.rs `water_freezes_to_ice_when_cold` |
 | Water boils to steam, boiling soaks up heat | tested-pass (indirect) | heat.rs `phase` | via lava test |
 | Lava holds its own temperature, glows | impl-untested | material.rs `self_temp`, `glow` | |
-| Lava melts / ignites what it touches | impl-untested | heat.rs conduction + `ignite` | |
+| Lava melts / ignites what it touches | tested-pass (partly) | heat.rs conduction + `ignite` | interactions.rs `lava_sets_adjacent_wood_alight`; melting untested |
 | Rock melts to lava at high temperature | impl-untested | heat.rs `phase` (`melt`) | needs a material with `melt` set |
 | Different conductors (metal vs wood vs air) | impl-untested | material.rs `conduct`, heat.rs `thermal` | |
 | Frostbite / heat damage to creatures from ambient temperature | missing | life/ | burns exist (see Life) |
@@ -73,7 +73,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Gale blows out exposed flames, not lanterns | tested-pass | flames.rs | elements.rs `gale_blows_out_torches_but_not_lanterns` |
 | Wet things dry out, faster when warm | impl-untested | flames.rs | |
 | Fire relights a dry flame | impl-untested | flames.rs | |
-| Burning floor over empty space leaves a hole | impl-untested | heat.rs `burn_out` | |
+| Burning floor over empty space leaves a hole | tested-pass | heat.rs `burn_out` | interactions.rs `burning_floor_over_empty_space_leaves_a_hole` |
 | Fire needs air (smothers when sealed, draught feeds it) | missing | | "no oxygen model" by design; a candidate if wanted |
 | Fire jumps to flammable things (items, furniture, creatures) | missing | flames.rs / things | fire only lives in tiles; things only carry their own flame |
 | Burning creature sets cells alight / runs to water | missing | life/ | |
@@ -84,8 +84,8 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 
 | Interaction | Status | Lives in | Test / note |
 |---|---|---|---|
-| Sky exposure spreads, leaks through doorways | impl-untested | light.rs `compute_sky` | |
-| Walls stop light, transparent walls (glass, ice) pass it | impl-untested | light.rs, material.rs `transparent` | |
+| Sky exposure spreads, leaks through doorways | tested-pass | light.rs `compute_sky` | interactions.rs `sky_light_leaks_through_a_doorway_and_fades` |
+| Walls stop light, transparent walls (glass, ice) pass it | tested-pass (sky light) | light.rs, material.rs `transparent` | interactions.rs `glass_and_ice_roofs_pass_sky_light_but_stone_stops_it`; dynamic light untested |
 | Dynamic coloured light from torches, fire, lava | impl-untested | light.rs `LightMap`, `gather_sources` | |
 | FOV symmetric | tested-pass | grid sight | physics.rs `fov_is_symmetric` |
 | Walls hide what is behind them | tested-pass (sea-scale) | sight | sight.rs `an_island_hides_what_is_behind_it` |
@@ -166,6 +166,6 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 
 ## Notes for later tasks
 
-- No row is tested-fail. Biggest untested clusters: light (all of it), gas decay and rise, phase changes other than water-lava, weather generators, worldgen detail.
+- No row is tested-fail (tach-002 added tests/interactions.rs, 10 rows now pass). Biggest untested clusters: light (all of it), gas decay and rise, phase changes other than water-lava, weather generators, worldgen detail.
 - Cheapest high-value tests to write first: ice melt and water freeze, gas conservation, smoke rises and is sealed by a ceiling, blast ignites wood, burning floor under rain, sky light through a doorway.
 - Biggest missing behaviours: immiscible liquids (oil), flammable gas, plant growth, condensation, lightning, porous ground.
