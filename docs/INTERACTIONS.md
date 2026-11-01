@@ -28,11 +28,11 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 
 | Interaction | Status | Lives in | Test / note |
 |---|---|---|---|
-| Smoke rises, diffuses, decays (faster under open sky) | impl-untested | gas.rs `step` | no direct test of rise/decay |
+| Smoke rises, diffuses, decays (faster under open sky) | tested-pass (partly) | gas.rs `step` | interactions.rs `smoke_rises_decays_and_pools_under_a_ceiling`; faster decay under open sky untested |
 | Wind drifts gas under open sky | tested-pass | gas.rs | elements.rs `fog_drifts_downwind` |
 | No wind indoors / under a roof | tested-pass | gas.rs, light.rs sky | elements.rs `no_rain_or_wind_under_a_roof` |
 | Gas blocks sight above `opacity` | tested-pass (partly) | material.rs, sight | sight.rs `haze_fog_and_smoke_wash_her_out` (sea-scale only; per-cell opacity untested) |
-| Gas conserved in diffusion | impl-untested | gas.rs | no conservation test, unlike liquid and heat |
+| Gas conserved in diffusion | tested-pass | gas.rs | interactions.rs `gas_is_conserved_in_a_sealed_room` |
 | Gas sealed by ceilings / pools under them | impl-untested | gas.rs | |
 | Steam from boiling water | tested-pass | heat.rs `phase` | physics.rs lava+water test checks steam |
 | Steam condenses back to water on cold surfaces | missing | | no gas-to-liquid phase |
@@ -49,7 +49,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Sleeping chunks do not leak heat | tested-pass | heat.rs, world wake | physics.rs `heat_does_not_leak_into_sleeping_chunks` |
 | Hot air rises | impl-untested | heat.rs | |
 | Sky drift to outdoor temp, deep-earth sink | impl-untested | heat.rs | |
-| Ice melts to water | impl-untested | heat.rs `phase` | ice material exists; no test |
+| Ice melts to water | tested-pass | heat.rs `phase` | interactions.rs `ice_melts_to_water_when_warm` |
 | Water freezes to ice | impl-untested | heat.rs `phase` | |
 | Water boils to steam, boiling soaks up heat | tested-pass (indirect) | heat.rs `phase` | via lava test |
 | Lava holds its own temperature, glows | impl-untested | material.rs `self_temp`, `glow` | |
@@ -67,7 +67,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Fire spreads along wood | tested-pass | heat.rs `burn` | physics.rs `fire_spreads_along_a_wooden_wall` |
 | Wind fans fire and pushes it downwind | tested-pass | heat.rs | elements.rs `wind_drives_a_fire_downwind` |
 | Water in cell or beside it quenches fire, and it stays out | tested-pass | heat.rs `burn`, `quench` | elements.rs `water_puts_out_fire_and_it_stays_out` |
-| Fire cannot start in a wet cell (>= 8/64) | impl-untested | heat.rs `burn` | covered only implicitly |
+| Fire cannot start in a wet cell (>= 8/64) | tested-pass | heat.rs `burn` | interactions.rs `fire_cannot_start_in_a_wet_cell` |
 | Rain quenches exposed fire, not sheltered | tested-pass (partly) | heat.rs `burn` | elements.rs `rain_puts_out_open_flames` (carried flames); burning cells under rain untested |
 | Torch / lantern goes out underwater, hard to light wet | tested-pass | flames.rs | elements.rs `torch_goes_out_underwater_and_is_hard_to_light_wet` |
 | Gale blows out exposed flames, not lanterns | tested-pass | flames.rs | elements.rs `gale_blows_out_torches_but_not_lanterns` |
@@ -141,7 +141,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Enough shot breaks a wall | tested-pass | projectile.rs / ballistics | ballistics.rs `enough_shot_breaks_a_wall` |
 | Shot strikes people in its path | tested-pass | projectile.rs `pass` | ballistics.rs |
 | Ball skips on water; plunging ball is spent in metres | tested-pass | sea/ballistics.rs | ballistics.rs |
-| Blast sets flammables alight, makes smoke | impl-untested | projectile.rs `explode` | wood-shelter test checks damage, not ignition |
+| Blast sets flammables alight, makes smoke | tested-pass (ignition) | projectile.rs `explode` | interactions.rs `a_blast_sets_nearby_wood_alight`; smoke untested |
 | Blast on water: spout, wave, no fire | missing | projectile.rs | |
 | Blast in a sealed room: pressure, gas pushed out | missing | | |
 | Wind deflects arrows and bolts | missing | projectile.rs | gale does not move shots |
