@@ -178,6 +178,8 @@ export interface TermOptions {
 	onDraw: (t: Term) => void;
 	/** Desktop keys (PageUp, Escape...) not typed into the entry field. */
 	onKey?: (key: string, ev: KeyboardEvent) => void;
+	/** A mouse moving over the grid: the cell under it (null when it leaves). */
+	onHover?: (cell: { x: number; y: number } | null) => void;
 }
 
 const esc = (c: string) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c);
@@ -263,6 +265,12 @@ export class Term extends Grid {
 			this.tapAt = { x, y };
 			if (fn) fn();
 		});
+		this.pre.addEventListener('pointermove', (ev) => {
+			if (ev.pointerType !== 'mouse' || !this.opts.onHover) return;
+			const b = this.pre.getBoundingClientRect();
+			this.opts.onHover({ x: Math.floor((ev.clientX - b.left) / this.cw), y: Math.floor((ev.clientY - b.top) / this.lh) });
+		});
+		this.pre.addEventListener('pointerleave', () => this.opts.onHover?.(null));
 		doc.addEventListener('keydown', (ev) => {
 			if (ev.target === this.input || ev.ctrlKey || ev.metaKey || ev.altKey) return;
 			this.opts.onKey?.(ev.key, ev);
@@ -298,6 +306,14 @@ export class Term extends Grid {
 	setCols(cols: number) {
 		if ((this.opts.cols ?? 44) === cols) return;
 		this.opts.cols = cols;
+		this.fit();
+	}
+
+	/** Change the largest font and the fewest rows (a screen that wants bigger cells); refits when they change. */
+	setScale(maxFont: number, rows: number) {
+		if ((this.opts.maxFont ?? 24) === maxFont && (this.opts.rows ?? 24) === rows) return;
+		this.opts.maxFont = maxFont;
+		this.opts.rows = rows;
 		this.fit();
 	}
 
