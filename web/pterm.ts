@@ -234,7 +234,9 @@ export class Term extends Grid {
 			+ '.pt-row i{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-style:normal;overflow:hidden;vertical-align:top}'
 			// (a bold glyph keeps to its cell, so the row stays on the grid)
 			+ '.pt-row b{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-weight:900;vertical-align:top}'
-			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}';
+			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}'
+			// (one outside ASCII, a face, fills the square its two columns make)
+			+ '.pt-row i.f{display:inline-flex;align-items:center;justify-content:center;font-size:1.5em;line-height:1}';
 		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
 		this.pre.style.cssText = 'margin:0;font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
@@ -391,7 +393,7 @@ export class Term extends Grid {
 					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${p[c.bg] ?? p[0]}">`);
 					cur = key;
 				}
-				if (c.wide) { out.push(`<i class="w">${esc(c.ch)}</i>`); x++; }
+				if (c.wide) { out.push(c.ch.charCodeAt(0) > 126 ? `<i class="w f">${esc(c.ch)}\uFE0E</i>` : `<i class="w">${esc(c.ch)}</i>`); x++; }
 				// Half blocks are painted as two exact halves of colour, so pixel pictures have no seams.
 				else if (c.ch === '▀' || c.ch === '▄') {
 					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], p[c.bg] ?? p[0]] : [p[c.bg] ?? p[0], p[c.fg] ?? p[4]];
