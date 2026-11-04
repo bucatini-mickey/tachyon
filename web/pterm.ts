@@ -393,7 +393,7 @@ export class Term extends Grid {
 					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${p[c.bg] ?? p[0]}">`);
 					cur = key;
 				}
-				if (c.wide) { out.push(c.ch.charCodeAt(0) > 126 ? `<i class="w f">${esc(c.ch)}\uFE0E</i>` : `<i class="w">${esc(c.ch)}</i>`); x++; }
+				if (c.wide) { out.push(/[^\x00-\x7e]/.test(c.ch) ? `<i class="w f">${esc(c.ch)}\uFE0E</i>` : `<i class="w">${esc(c.ch)}</i>`); x++; }
 				// Half blocks are painted as two exact halves of colour, so pixel pictures have no seams.
 				else if (c.ch === '▀' || c.ch === '▄') {
 					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], p[c.bg] ?? p[0]] : [p[c.bg] ?? p[0], p[c.fg] ?? p[4]];
