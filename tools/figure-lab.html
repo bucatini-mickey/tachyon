@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Figure Lab</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d12;--panel:#161a22;--line:#2a3140;--fg:#cecfd4;--dim:#8b91a0;--gold:#e8c460;--plate:#3a3118;--cell:16px;
+--mono:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:14px/1.4 var(--mono);margin:0;padding:0 12px 40px}
+h1{font-size:17px;color:var(--gold);margin:12px 0 2px}
+p{color:var(--dim);margin:0 0 8px;max-width:75ch}
+.bar{position:sticky;top:0;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:10px;align-items:center;z-index:2;font-size:12px}
+button,input,select{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:4px 8px}
+.card{border:1px solid var(--line);background:var(--panel);border-radius:4px;margin:10px 0;padding:8px 10px}
+.card.sel{border-color:var(--gold)}
+.head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.head b{color:var(--gold)}.head .cp{color:var(--dim);font-size:11px}
+.desc{margin:2px 0}.use{color:var(--dim);margin:0 0 6px;font-size:12px}.use span{color:var(--fg)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.v{display:flex;flex-direction:column;align-items:center;font-size:11px;color:var(--dim);gap:2px}
+/* What Grimoire's pterm draws for a glyph outside ASCII in a wide cell: a box two cells by one line,
+   centred, glyph at 1.5em, clipped, text style (VS15). Same font stack as pterm. */
+.cell{display:inline-block;font-family:var(--mono);font-variant-ligatures:none;font-size:var(--cell);line-height:1.2;height:1.2em;width:1.2em}
+.cell i{display:inline-flex;align-items:center;justify-content:center;font-style:normal;overflow:hidden;width:100%;height:100%;font-size:1.5em;line-height:1;background:var(--plate);color:var(--gold)}
+.cell.big{font-size:calc(var(--cell)*3)}
+.strip{background:#07080b;padding:6px;margin:6px 0;display:flex;flex-wrap:wrap;gap:2px}
+</style>
+<h1>Figure Lab</h1>
+<p>Candidate figures for the village map, drawn the way Grimoire's cell display draws a figure (a two-cell square, glyph at 1.5x, clipped, text style), plain and with a dot, tilde, acute, grave or circumflex over it. Proposals only: nothing here changes Grimoire's chosen set. Tick the ones you like, then Copy picks (figure-picks.json format).</p>
+<div class="bar">
+ <label>Cell px <input id="cs" type="range" min="10" max="32" value="16"></label>
+ <label>Group <select id="grp"></select></label>
+ <button id="cp" type="button">Copy picks</button><span id="n"></span>
+</div>
+<div id="cur" class="card"></div>
+<div id="list"></div>
+<script>
+const MARKS=[['plain',''],['dot','̇'],['tilde','̃'],['acute','́'],['grave','̀'],['circumflex','̂']];
+// [base, name, what it looks like, intended use, group]
+const C=[
+['ı','Dotless stem','a bare stem; the dot variant gives a clean head over a body','Best base for a dot head; any adult villager','Upright'],
+['i','Slim upright','a tall stroke with its own dot head','Ordinary villager, default walker','Upright'],
+['ł','Staff-bearer','a stem with a slash, like someone leaning on a stick','Elder, pilgrim, shepherd','Upright'],
+['ŧ','Crossbar','a stem with a crossbar: arms held out','Sentry, scarecrow-like, a preacher','Upright'],
+['ƚ','Slashed ell','a tall figure with a slanted shoulder line','Messenger, tall traveller','Upright'],
+['ɨ','Barred i','a stem with a short belt','Guard with a belt, tradesperson','Upright'],
+['ү','Arms raised','a Y: two arms up, one body','Someone calling out, cheering, pleading','Arms'],
+['ψ','Trident','arms and body in a cup shape','Armed or alert figure, a hunter','Arms'],
+['ϒ','Open arms','upsilon hook: arms flung wide','Prayer, accusation, the one being voted on','Arms'],
+['ɣ','Gamma legs','arms up, one leg trailing','Runner, someone fleeing','Arms'],
+['ᛉ','Algiz rune','arms raised, runic','Abbey or old-world cast, ritual roles','Arms'],
+['ʌ','Tent','a pointed cloak with no head of its own','Hooded stranger; the dot adds a hood tip','Cloaked'],
+['Λ','Bell cloak','a wide capital lambda','Priest, cloaked visitor','Cloaked'],
+['∩','Arch','the rounded hood or dome of a coat','Monk, someone huddled in a cloak','Cloaked'],
+['ᴧ','Small tent','small-cap lambda: a low cloak','Child in a cloak, short figure','Cloaked'],
+['Ω','Skirted','omega: round head, flared base','Noble in a long gown, widow, matron','Cloaked'],
+['ո','Hunched','small n: a bowed back on two feet','Bent elder, the sick, someone sneaking','Hunched'],
+['ռ','Stooped','n with a long right leg','Labourer carrying a load','Hunched'],
+['ɲ','Leaning','n with a long left leg: leaning on a staff','Elder with a cane','Hunched'],
+['π','Wide stance','pi: standing square, arms across','Soldier at ease, blacksmith, a strong figure','Stance'],
+['ᴨ','Gate','small-cap pe: square shoulders','Guard, watchman','Stance'],
+['ϻ','Broad','broad shoulders, two legs','Brawler, drover','Stance'],
+['ж','Many arms','zhe: arms and legs flung out','Dancer, drunk, someone in distress','Stance'],
+['ө','Round belly','a rounded body','Innkeeper, baker, cook','Round'],
+['ɵ','Barred round','o with a bar: round body with a belt','Merchant, sack-carrier','Round'],
+['ö','Plain round','o with diaeresis (Grimoire\'s fallback face)','Neutral stand-in','Round'],
+['ơ','Round with horn','o with a hook at the shoulder','Someone with a bag or pack','Round'],
+['ɑ','Compact','single-storey a: a small tidy body','Child or small adult','Round'],
+['α','Alpha','a body with a flicking tail','Slight, fast figure, scout','Round'],
+['ʋ','Cupped','v with a hook: arms cupped','Beggar, someone offering something','Round'],
+['χ','Crossed','chi: crossed legs, striding','Traveller on the move, soldier marching','Walker'],
+['ʍ','Winged','broad shoulders and two feet','Messenger, harpy-like folk','Walker'],
+['ɉ','Curled','j with a bar: a trailing leg','Thief, courier','Walker'],
+['ϰ','Kneeling','kappa: knees bent','Someone kneeling at the altar','Walker'],
+['ɥ','Upturned','h turned over: head down','Bowed head, the condemned','Walker']
+];
+const CUR='ø̇ ơ̇ ƛ̇ ȼ̇ ɉ̇ ƣ̇ ʋ̇ ʍ̇ ᵿ̇ ᴨ̇ ᴪ̇ χ̇ ⵅ̇ ⴰ̇ ≁̇ µ̇ ⌅̇ ♀̇ ϫ̇ ө̇ қ̇ џ̇ ч̇ ጰ̇ ṡ ᵯ̇ ᵰ̇ ᵶ̇ ᵴ̇ ᴕ̇'.split(' ');
+const $=id=>document.getElementById(id);
+const VS='︎';
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const cell=(g,big)=>`<span class="cell${big?' big':''}"><i>${esc(g)}${VS}</i></span>`;
+let picks=new Set();
+try{picks=new Set(JSON.parse(localStorage.getItem('figlab')||'[]'))}catch{}
+const groups=['All',...new Set(C.map(c=>c[4]))];
+$('grp').innerHTML=groups.map(g=>`<option>${g}</option>`).join('');
+function render(){
+ const gr=$('grp').value;
+ $('cur').innerHTML='<b style="color:var(--gold)">Grimoire now (reference, unchanged)</b><div class="strip">'+CUR.map(g=>cell(g)).join('')+'</div>';
+ $('list').innerHTML=C.filter(c=>gr==='All'||c[4]===gr).map(c=>{
+  const cp='U+'+c[0].codePointAt(0).toString(16).toUpperCase().padStart(4,'0');
+  const vs=MARKS.map(([n,m])=>{const g=c[0]+m;return `<div class="v">${cell(g,true)}<label><input type="checkbox" data-g="${esc(g)}" ${picks.has(g)?'checked':''}> ${n}</label></div>`}).join('');
+  const strip='<div class="strip">'+MARKS.slice(0,2).map(([n,m])=>cell(c[0]+m).repeat(3)).join('')+'<span style="width:1em"></span>'+MARKS.slice(2).map(([n,m])=>cell(c[0]+m)).join('')+'</div>';
+  return `<div class="card${[...picks].some(p=>p.startsWith(c[0]))?' sel':''}"><div class="head"><b>${esc(c[1])}</b><span class="cp">${esc(c[0])} ${cp} - ${c[4]}</span></div><p class="desc">${c[2]}.</p><p class="use">Use: <span>${c[3]}</span></p><div class="row">${vs}</div>${strip}</div>`}).join('');
+ $('n').textContent=picks.size+' picked';
+ document.documentElement.style.setProperty('--cell',$('cs').value+'px');
+}
+document.addEventListener('change',e=>{const g=e.target.dataset&&e.target.dataset.g;if(g!==undefined){e.target.checked?picks.add(g):picks.delete(g);try{localStorage.setItem('figlab',JSON.stringify([...picks]))}catch{}$('n').textContent=picks.size+' picked'}});
+$('cs').oninput=render;$('grp').onchange=render;
+$('cp').onclick=()=>{navigator.clipboard.writeText(JSON.stringify({figure:[...picks]},null,1)).then(()=>$('n').textContent='copied '+picks.size)};
+render();
+</script>
