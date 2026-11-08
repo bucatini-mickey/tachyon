@@ -13,7 +13,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Liquid falls and levels out | tested-pass | fluid.rs `step` | physics.rs `liquid_falls_and_levels` |
 | Liquid mass conserved | tested-pass | fluid.rs | physics.rs `liquid_mass_is_conserved` |
 | Pressure: U-tube comes level, still lake costs nothing | tested-pass | fluid.rs `pressure` | pressure.rs (3 tests) |
-| Viscosity (oil, lava slower than water) | impl-untested | material.rs `Liquid{viscosity}`, fluid.rs | physics.rs adds an oil material but no test asserts its rate |
+| Viscosity (oil, lava slower than water) | tested-pass | material.rs `Liquid{viscosity}`, fluid.rs | interactions.rs `lava_spreads_more_slowly_than_water` |
 | Water + lava: obsidian + steam | tested-pass | fluid.rs `react` | physics.rs `water_on_lava_makes_obsidian_and_steam` |
 | Immiscible liquids (oil on water, layering by density) | missing | fluid.rs | liquids "simply do not mix"; no density, oil does not float |
 | Thin film evaporation | impl-untested | fluid.rs trickle, `Material::evaporate` | |
@@ -47,15 +47,15 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 |---|---|---|---|
 | Conduction, symmetric, heat conserved | tested-pass | heat.rs `step` | physics.rs `heat_is_conserved` |
 | Sleeping chunks do not leak heat | tested-pass | heat.rs, world wake | physics.rs `heat_does_not_leak_into_sleeping_chunks` |
-| Hot air rises | impl-untested | heat.rs | |
-| Sky drift to outdoor temp, deep-earth sink | impl-untested | heat.rs | |
+| Hot air rises | tested-pass | heat.rs | interactions.rs `hot_air_rises_faster_than_it_sinks` |
+| Sky drift to outdoor temp, deep-earth sink | tested-pass (partly) | heat.rs | interactions.rs `open_air_drifts_to_the_outdoor_temperature_but_a_roofed_room_does_not`; deep-earth sink untested |
 | Ice melts to water | tested-pass | heat.rs `phase` | interactions.rs `ice_melts_to_water_when_warm` |
 | Water freezes to ice | tested-pass | heat.rs `phase` | interactions.rs `water_freezes_to_ice_when_cold` |
 | Water boils to steam, boiling soaks up heat | tested-pass (indirect) | heat.rs `phase` | via lava test |
-| Lava holds its own temperature, glows | impl-untested | material.rs `self_temp`, `glow` | |
+| Lava holds its own temperature, glows | tested-pass | material.rs `self_temp`, `glow` | interactions.rs `lava_holds_its_temperature_and_glows` |
 | Lava melts / ignites what it touches | tested-pass (partly) | heat.rs conduction + `ignite` | interactions.rs `lava_sets_adjacent_wood_alight`; melting untested |
-| Rock melts to lava at high temperature | impl-untested | heat.rs `phase` (`melt`) | needs a material with `melt` set |
-| Different conductors (metal vs wood vs air) | impl-untested | material.rs `conduct`, heat.rs `thermal` | |
+| Rock melts to lava at high temperature | tested-pass | heat.rs `phase` (`melt`) | interactions.rs `rock_with_a_melting_point_turns_to_lava` (custom material; no standard rock has `melt`) |
+| Different conductors (metal vs wood vs air) | tested-pass | material.rs `conduct`, heat.rs `thermal` | interactions.rs `metal_conducts_heat_far_better_than_wood` |
 | Frostbite / heat damage to creatures from ambient temperature | missing | life/ | burns exist (see Life) |
 | Snow/ice from weather when cold | missing | weather.rs | |
 
@@ -71,8 +71,8 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Rain quenches exposed fire, not sheltered | tested-pass (partly) | heat.rs `burn` | elements.rs `rain_puts_out_open_flames` (carried flames); burning cells under rain untested |
 | Torch / lantern goes out underwater, hard to light wet | tested-pass | flames.rs | elements.rs `torch_goes_out_underwater_and_is_hard_to_light_wet` |
 | Gale blows out exposed flames, not lanterns | tested-pass | flames.rs | elements.rs `gale_blows_out_torches_but_not_lanterns` |
-| Wet things dry out, faster when warm | impl-untested | flames.rs | |
-| Fire relights a dry flame | impl-untested | flames.rs | |
+| Wet things dry out, faster when warm | tested-pass | flames.rs | interactions.rs `wet_flames_dry_faster_when_warm` |
+| Fire relights a dry flame | tested-pass | flames.rs | interactions.rs `fire_relights_a_dry_flame_but_not_a_soaked_one` |
 | Burning floor over empty space leaves a hole | tested-pass | heat.rs `burn_out` | interactions.rs `burning_floor_over_empty_space_leaves_a_hole` |
 | Fire needs air (smothers when sealed, draught feeds it) | missing | | "no oxygen model" by design; a candidate if wanted |
 | Fire jumps to flammable things (items, furniture, creatures) | missing | flames.rs / things | fire only lives in tiles; things only carry their own flame |
@@ -85,11 +85,11 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Interaction | Status | Lives in | Test / note |
 |---|---|---|---|
 | Sky exposure spreads, leaks through doorways | tested-pass | light.rs `compute_sky` | interactions.rs `sky_light_leaks_through_a_doorway_and_fades` |
-| Walls stop light, transparent walls (glass, ice) pass it | tested-pass (sky light) | light.rs, material.rs `transparent` | interactions.rs `glass_and_ice_roofs_pass_sky_light_but_stone_stops_it`; dynamic light untested |
-| Dynamic coloured light from torches, fire, lava | impl-untested | light.rs `LightMap`, `gather_sources` | |
+| Walls stop light, transparent walls (glass, ice) pass it | tested-pass | light.rs, material.rs `transparent` | interactions.rs `glass_and_ice_roofs_pass_sky_light_but_stone_stops_it`, `dynamic_light_comes_from_flames_and_stops_at_walls` |
+| Dynamic coloured light from torches, fire, lava | tested-pass | light.rs `LightMap`, `gather_sources` | interactions.rs `dynamic_light_comes_from_flames_and_stops_at_walls`, `lava_holds_its_temperature_and_glows` |
 | FOV symmetric | tested-pass | grid sight | physics.rs `fov_is_symmetric` |
 | Walls hide what is behind them | tested-pass (sea-scale) | sight | sight.rs `an_island_hides_what_is_behind_it` |
-| Unlit or submerged flame gives no light | impl-untested | light.rs + flames.rs | |
+| Unlit or submerged flame gives no light | tested-pass | light.rs + flames.rs | interactions.rs `a_submerged_flame_goes_dark_and_gives_no_light`, dynamic light test (unlit) |
 | Flicker | impl-untested | light.rs `flicker` | |
 | Water dims light with depth | missing | | |
 | Smoke dims light | missing | | smoke blocks sight, not light |
