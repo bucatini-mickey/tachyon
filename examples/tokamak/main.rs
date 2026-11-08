@@ -24,7 +24,10 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use tachyon::blueprint::{Blueprint, BpCell};
+use tachyon::blueprint::BpCell;
+// The file formats live in the engine now (src/make/library.rs). `use` brings names into
+// scope; they are only reachable because the engine marks them `pub`.
+use tachyon::library::{library_text, parse_library, rgb, Art, Entry, Part, Socket, DIRS, PALETTE, SEED_LIBRARY};
 use tachyon::prelude::*;
 use tachyon::tile::Tile;
 
@@ -36,183 +39,6 @@ const FAINT: Rgb = Rgb(40, 38, 34);
 const GOLD: Rgb = Rgb(220, 180, 90);
 const RED: Rgb = Rgb(220, 100, 80);
 const UNDO_DEPTH: usize = 200;
-
-// ---- the library: materials and kinds, as text ------------------------------------------------
-
-#[derive(Clone, Debug)]
-struct Entry {
-    kind: bool,
-    name: String,
-    glyph: char,
-    floor: char,
-    fg: Rgb,
-    bg: Rgb,
-    tags: Vec<String>,
-}
-
-fn rgb(s: &str) -> Option<Rgb> {
-    let v: Vec<u8> = s.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-    (v.len() == 3).then(|| Rgb(v[0], v[1], v[2]))
-}
-
-/// `material oak | # . | 140 100 60 | 50 34 20 | wood` and `kind cannon | o | 70 70 76 | metal heavy`.
-fn parse_library(text: &str) -> Vec<Entry> {
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
-        if word != "material" && word != "kind" {
-            continue;
-        }
-        // Fields part at " | ", so a glyph can itself be a | (a mast).
-        let f: Vec<&str> = rest.split(" | ").map(|s| s.trim().trim_end_matches(" |")).collect();
-        let glyphs: Vec<char> = f.get(1).unwrap_or(&"?").chars().filter(|c| *c != ' ').collect();
-        out.push(Entry {
-            kind: word == "kind",
-            name: f[0].to_string(),
-            glyph: *glyphs.first().unwrap_or(&'?'),
-            floor: *glyphs.get(1).unwrap_or(&'.'),
-            fg: f.get(2).and_then(|s| rgb(s)).unwrap_or(INK),
-            bg: f.get(3).and_then(|s| rgb(s)).unwrap_or(BG),
-            tags: f.get(4).map(|s| s.split_whitespace().map(String::from).collect()).unwrap_or_default(),
-        });
-    }
-    out
-}
-
-fn library_text(project: &str, lib: &[Entry]) -> String {
-    let mut s = format!("tachyon-library 1\n# The {project} library: materials (wall and floor glyphs) and kinds (things).\n");
-    for e in lib {
-        let c = |c: Rgb| format!("{} {} {}", c.0, c.1, c.2);
-        if e.kind {
-            s += &format!("kind {} | {} | {} | {} | {}\n", e.name, e.glyph, c(e.fg), c(e.bg), e.tags.join(" "));
-        } else {
-            s += &format!("material {} | {} {} | {} | {} | {}\n", e.name, e.glyph, e.floor, c(e.fg), c(e.bg), e.tags.join(" "));
-        }
-    }
-    s
-}
-
-/// A start for a new project: stone and timber, metals, the sea, the stars.
-const SEED_LIBRARY: &str = "tachyon-library 1
-material stone block | # . | 178 176 168 | 52 50 48 | stone masonry
-material granite | % , | 130 128 136 | 40 38 44 | stone rock
-material oak | # + | 150 108 64 | 46 32 18 | wood timber
-material pine plank | # = | 196 160 104 | 58 44 26 | wood timber deck
-material iron | # : | 150 150 160 | 34 34 40 | metal
-material steel plate | # - | 176 184 196 | 30 34 40 | metal hull
-material brass | # . | 214 172 92 | 52 40 18 | metal fitting
-material glass | ' . | 170 214 232 | 30 50 60 | clear window
-material earth | # , | 128 92 58 | 44 30 18 | soil
-material grass | \" , | 84 150 58 | 22 40 16 | soil plant
-material water | ~ ~ | 96 150 196 | 16 38 64 | liquid
-material hull alloy | # . | 120 200 210 | 18 30 36 | metal scifi
-material concrete | # . | 160 160 156 | 46 46 44 | stone modern
-kind door | ' | 200 150 90 | 0 0 0 | opening
-kind bed | B | 180 140 110 | 0 0 0 | furniture
-kind table | T | 170 120 70 | 0 0 0 | furniture
-kind chair | h | 170 120 70 | 0 0 0 | furniture
-kind chest | = | 190 150 80 | 0 0 0 | container
-kind barrel | 0 | 160 110 60 | 0 0 0 | container
-kind torch | ! | 255 190 90 | 0 0 0 | light
-kind ladder | H | 190 150 90 | 0 0 0 | climb
-kind cannon | o | 90 90 96 | 0 0 0 | weapon ship
-kind mast | | | 200 170 110 | 0 0 0 | ship
-kind wheel | * | 190 140 80 | 0 0 0 | ship helm
-kind anchor | J | 140 140 150 | 0 0 0 | ship
-kind console | & | 120 220 200 | 0 0 0 | scifi
-kind vent | # | 110 120 130 | 0 0 0 | scifi
-kind crate | x | 170 130 80 | 0 0 0 | container
-";
-
-// ---- parts: a blueprint and its sockets -------------------------------------------------------
-
-const DIRS: [&str; 6] = ["n", "e", "s", "w", "up", "down"];
-
-#[derive(Clone, Debug)]
-struct Socket {
-    x: i32,
-    y: i32,
-    z: i32,
-    dir: usize,
-    tag: String,
-}
-
-#[derive(Clone)]
-struct Part {
-    bp: Blueprint,
-    sockets: Vec<Socket>,
-}
-
-impl Part {
-    fn new(name: &str, w: i32, h: i32, d: i32) -> Part {
-        Part { bp: Blueprint { name: name.into(), w, h, d, cells: vec![None; (w * h * d) as usize] }, sockets: Vec::new() }
-    }
-    fn idx(&self, x: i32, y: i32, z: i32) -> usize {
-        ((z * self.bp.h + y) * self.bp.w + x) as usize
-    }
-    fn inside(&self, x: i32, y: i32) -> bool {
-        x >= 0 && y >= 0 && x < self.bp.w && y < self.bp.h
-    }
-    fn text(&self) -> String {
-        let mut s = self.bp.to_text();
-        for k in &self.sockets {
-            s += &format!("socket {} {} {} {} {}\n", k.x, k.y, k.z, DIRS[k.dir], k.tag);
-        }
-        s
-    }
-    fn from_text(text: &str) -> Result<Part, String> {
-        let bp = Blueprint::from_text(text)?;
-        let mut sockets = Vec::new();
-        for line in text.lines().skip_while(|l| l.trim() != "end") {
-            let v: Vec<&str> = line.split_whitespace().collect();
-            if v.first() == Some(&"socket") && v.len() >= 5 {
-                let n = |i: usize| v[i].parse::<i32>().unwrap_or(0);
-                sockets.push(Socket { x: n(1), y: n(2), z: n(3), dir: DIRS.iter().position(|d| *d == v[4]).unwrap_or(0), tag: v.get(5).unwrap_or(&"any").to_string() });
-            }
-        }
-        Ok(Part { bp, sockets })
-    }
-    /// A level more on top (or one fewer), keeping what is built.
-    fn resize_depth(&mut self, d: i32) {
-        let d = d.max(1);
-        let plane = (self.bp.w * self.bp.h) as usize;
-        self.bp.cells.resize(plane * d as usize, None);
-        self.bp.d = d;
-        self.sockets.retain(|k| k.z < d);
-    }
-    /// The level below, built again on level `z`: walls and floors carry up, stairs up meet
-    /// stairs down, and the things stay where they were.
-    fn copy_level_up(&mut self, z: i32) {
-        if z <= 0 || z >= self.bp.d {
-            return;
-        }
-        for y in 0..self.bp.h {
-            for x in 0..self.bp.w {
-                let below = self.bp.cells[self.idx(x, y, z - 1)].as_ref().map(|c| {
-                    let tile = match c.tile {
-                        Tile::StairUp => Tile::StairDown,
-                        Tile::StairDown | Tile::Ramp => Tile::Floor,
-                        t => t,
-                    };
-                    BpCell { tile, mat: c.mat.clone(), things: vec![] }
-                });
-                let i = self.idx(x, y, z);
-                self.bp.cells[i] = below;
-            }
-        }
-    }
-}
-
-// ---- art: glyph pictures (logos, title art, signs) ------------------------------------------------
-
-/// The art palette: night black first, then inks.
-const PALETTE: [Rgb; 16] = [
-    Rgb(0, 0, 0), Rgb(222, 214, 196), Rgb(120, 112, 100), Rgb(60, 56, 50),
-    Rgb(220, 180, 90), Rgb(200, 120, 50), Rgb(220, 90, 70), Rgb(150, 40, 40),
-    Rgb(120, 190, 90), Rgb(50, 110, 60), Rgb(110, 170, 220), Rgb(50, 80, 150),
-    Rgb(180, 120, 200), Rgb(110, 200, 190), Rgb(170, 130, 80), Rgb(255, 255, 255),
-];
 
 fn nearest(c: Rgb) -> usize {
     let d = |p: &Rgb| (p.0 as i32 - c.0 as i32).pow(2) + (p.1 as i32 - c.1 as i32).pow(2) + (p.2 as i32 - c.2 as i32).pow(2);
@@ -228,90 +54,6 @@ fn flip(c: char) -> char {
     }
 }
 
-#[derive(Clone)]
-struct Art {
-    name: String,
-    w: i32,
-    h: i32,
-    cells: Vec<Cell>,
-}
-
-impl Art {
-    fn new(name: &str, w: i32, h: i32) -> Art {
-        Art { name: name.into(), w, h, cells: vec![Cell::new(' ', PALETTE[1], PALETTE[0]); (w * h) as usize] }
-    }
-    fn inside(&self, x: i32, y: i32) -> bool {
-        x >= 0 && y >= 0 && x < self.w && y < self.h
-    }
-    fn text(&self) -> String {
-        // Every colour used gets a key; then the glyphs, the inks and the papers, a row a line.
-        let keys: Vec<char> = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".chars().collect();
-        let mut cols: Vec<Rgb> = Vec::new();
-        for c in &self.cells {
-            for x in [c.fg, c.bg] {
-                if !cols.contains(&x) && cols.len() < keys.len() {
-                    cols.push(x);
-                }
-            }
-        }
-        let key = |x: Rgb| keys[cols.iter().position(|c| *c == x).unwrap_or(0)];
-        let mut s = format!("tachyon-art 1\nname {}\nsize {} {}\n", self.name, self.w, self.h);
-        for (i, c) in cols.iter().enumerate() {
-            s += &format!("color {} {} {} {}\n", keys[i], c.0, c.1, c.2);
-        }
-        for (title, f) in [("glyphs", 0), ("ink", 1), ("paper", 2)] {
-            s += title;
-            s.push('\n');
-            for y in 0..self.h {
-                for x in 0..self.w {
-                    let c = self.cells[(y * self.w + x) as usize];
-                    s.push(match f { 0 => c.ch, 1 => key(c.fg), _ => key(c.bg) });
-                }
-                s.push('\n');
-            }
-        }
-        s + "end\n"
-    }
-    fn from_text(text: &str) -> Result<Art, String> {
-        let mut lines = text.lines();
-        if !lines.next().unwrap_or("").starts_with("tachyon-art") {
-            return Err("not Tachyon art".into());
-        }
-        let (mut name, mut w, mut h) = (String::from("art"), 0, 0);
-        let mut cols: Vec<(char, Rgb)> = Vec::new();
-        let mut grids: Vec<Vec<Vec<char>>> = Vec::new();
-        while let Some(l) = lines.next() {
-            let (word, rest) = l.split_once(' ').unwrap_or((l, ""));
-            match word {
-                "name" => name = rest.into(),
-                "size" => {
-                    let v: Vec<i32> = rest.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-                    (w, h) = (*v.first().unwrap_or(&0), *v.get(1).unwrap_or(&0));
-                }
-                "color" => {
-                    let mut it = rest.splitn(2, ' ');
-                    let k = it.next().and_then(|k| k.chars().next()).unwrap_or('a');
-                    cols.push((k, rgb(it.next().unwrap_or("")).unwrap_or(INK)));
-                }
-                "glyphs" | "ink" | "paper" => grids.push((0..h).map(|_| lines.next().unwrap_or("").chars().collect()).collect()),
-                "end" => break,
-                _ => {}
-            }
-        }
-        if w <= 0 || h <= 0 || grids.len() < 3 {
-            return Err("art has no size or rows".into());
-        }
-        let col = |k: char| cols.iter().find(|c| c.0 == k).map(|c| c.1).unwrap_or(INK);
-        let mut art = Art::new(&name, w, h);
-        for y in 0..h as usize {
-            for x in 0..w as usize {
-                let g = |n: usize| grids[n].get(y).and_then(|r| r.get(x)).copied().unwrap_or(' ');
-                art.cells[y * w as usize + x] = Cell::new(g(0), col(g(1)), col(g(2)));
-            }
-        }
-        Ok(art)
-    }
-}
 
 /// The cells of a 4-connected patch on a `w` x `h` grid that match the one at `(x, y)`.
 fn flood(w: i32, h: i32, x: i32, y: i32, same: impl Fn(i32, i32) -> bool) -> Vec<(i32, i32)> {
@@ -1734,6 +1476,7 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tachyon::blueprint::Blueprint;
 
     fn shop() -> Tokamak {
         let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY));
