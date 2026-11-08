@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use tachyon::blueprint::BpCell;
 // The file formats live in the engine now (src/make/library.rs). `use` brings names into
 // scope; they are only reachable because the engine marks them `pub`.
-use tachyon::library::{library_text, parse_library, rgb, Art, Entry, Part, Socket, DIRS, PALETTE, SEED_LIBRARY};
+use tachyon::library::{check_glyph, check_name, check_tag, clean_file_name, library_text, parse_library, rgb, Art, Entry, Part, Socket, DIRS, PALETTE, SEED_LIBRARY};
 use tachyon::prelude::*;
 use tachyon::tile::Tile;
 
@@ -431,9 +431,13 @@ impl Tokamak {
             }
             Act::OpenPart(name) => self.open_part(&name),
             Act::OpenArt(name) => self.open_art(&name),
-            Act::Project(name) => {
+            Act::Project(raw) => {
+                // Project names become folder names too (the picker's filter is free text).
+                let (name, changed) = clean_file_name(&raw);
                 if let Err(e) = self.load_project(&name) {
                     self.note = format!("Could not open project {name}: {e}");
+                } else if changed {
+                    self.note = format!("{} (project name changed from {raw} to {name})", self.note);
                 }
             }
         }
@@ -596,17 +600,33 @@ impl Tokamak {
             Ask::New => {
                 let v: Vec<&str> = t.split_whitespace().collect();
                 let n = |i: usize, d: i32| v.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
-                if let Some(name) = v.first() {
+                if let Some(raw) = v.first() {
+                    // The name becomes a file name, so make it safe and say what changed.
+                    let (name, changed) = clean_file_name(raw);
                     let act = if self.mode == Mode::Art {
-                        Act::NewArt(name.to_string(), n(1, 40).clamp(1, 300), n(2, 10).clamp(1, 200))
+                        Act::NewArt(name.clone(), n(1, 40).clamp(1, 300), n(2, 10).clamp(1, 200))
                     } else {
-                        Act::NewPart(name.to_string(), n(1, 16).clamp(1, 200), n(2, 10).clamp(1, 200), n(3, 1).clamp(1, 32))
+                        Act::NewPart(name.clone(), n(1, 16).clamp(1, 200), n(2, 10).clamp(1, 200), n(3, 1).clamp(1, 32))
                     };
-                    return self.guard(act);
+                    let flow = self.guard(act);
+                    if changed {
+                        self.note = format!("{} (name changed from {raw} to {name}: it must be a safe file name)", self.note);
+                    }
+                    return flow;
                 }
             }
             Ask::Rename | Ask::Tags | Ask::Colours => {
                 if t.is_empty() || self.pick >= self.lib.len() {
+                    return Flow::Continue;
+                }
+                // Reject text the library file could not read back, and say why.
+                let bad = match what {
+                    Ask::Rename => check_name(&t).err(),
+                    Ask::Tags => t.split_whitespace().find_map(|tag| check_tag(tag).err()),
+                    _ => None,
+                };
+                if let Some(note) = bad {
+                    self.note = note;
                     return Flow::Continue;
                 }
                 self.checkpoint();
@@ -626,7 +646,9 @@ impl Tokamak {
                 }
             }
             Ask::NewEntry(kind) => {
-                if !t.is_empty() {
+                if let Err(note) = check_name(&t) {
+                    self.note = note;
+                } else {
                     self.checkpoint();
                     self.lib.push(Entry { kind, name: t, glyph: if kind { '?' } else { '#' }, floor: '.', fg: INK, bg: if kind { Rgb(0, 0, 0) } else { BG }, tags: vec![] });
                     self.pick = self.lib.len() - 1;
@@ -636,7 +658,7 @@ impl Tokamak {
             Ask::SocketTag => {
                 self.checkpoint();
                 let (x, y, z) = (self.cx, self.cy, self.z);
-                let tag = if t.is_empty() { "any".to_string() } else { t.replace(' ', "-") };
+                let tag = if t.is_empty() { "any".to_string() } else { t.replace(' ', "-").replace('|', "-") };
                 self.last_tag = tag.clone();
                 self.part.sockets.retain(|k| !(k.x == x && k.y == y && k.z == z));
                 self.part.sockets.push(Socket { x, y, z, dir: 0, tag });
@@ -736,9 +758,15 @@ impl Game for Tokamak {
             }
             if let Ask::Glyph(floor) = what {
                 if let Key::Char(c) = k.key {
-                    self.checkpoint();
-                    if let Some(e) = self.lib.get_mut(self.pick) {
-                        if floor { e.floor = c } else { e.glyph = c }
+                    // A space or a floor | would not read back from the file: refuse with a note.
+                    match check_glyph(c, floor && self.lib.get(self.pick).is_some_and(|e| !e.kind)) {
+                        Err(note) => self.note = note,
+                        Ok(()) => {
+                            self.checkpoint();
+                            if let Some(e) = self.lib.get_mut(self.pick) {
+                                if floor { e.floor = c } else { e.glyph = c }
+                            }
+                        }
                     }
                 }
                 return Flow::Continue;
@@ -1468,8 +1496,12 @@ fn main() -> io::Result<()> {
         .nth(1)
         .or_else(|| fs::read_to_string("tokamak/.last").ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "default".into());
+    let (project, changed) = clean_file_name(&project);
     let mut app = Tokamak::blank(&project, Vec::new());
     app.load_project(&project)?;
+    if changed {
+        app.note = format!("{} (project name cleaned to {project})", app.note);
+    }
     tachyon::app::run(&mut app, 30)
 }
 
@@ -1628,5 +1660,38 @@ mod tests {
         (t.ax, t.ay) = (0, 1);
         t.art_put('(');
         assert_eq!(t.art.cells[6 + 5].ch, ')');
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn typing_a_bar_or_space_into_the_library_shows_a_note_and_changes_nothing() {
+        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY));
+        let (name, tags, glyph) = (t.lib[0].name.clone(), t.lib[0].tags.clone(), t.lib[0].glyph);
+        t.answer(Ask::Rename, "a | b".into());
+        assert_eq!(t.lib[0].name, name);
+        assert!(t.note.contains('|'), "{}", t.note);
+        t.answer(Ask::Tags, "ok bad|tag".into());
+        assert_eq!(t.lib[0].tags, tags);
+        t.note.clear();
+        t.answer(Ask::NewEntry(false), "x | y".into());
+        assert!(!t.note.is_empty());
+        assert!(t.lib.iter().all(|e| e.name != "x | y"));
+        t.answer(Ask::Rename, "fine name".into());
+        assert_eq!(t.lib[0].name, "fine name");
+        assert_eq!(t.lib[0].glyph, glyph);
+    }
+
+    #[test]
+    fn a_new_part_name_is_cleaned_and_the_note_says_so() {
+        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY));
+        t.answer(Ask::New, "..\\evil 4 4 1".into());
+        assert_eq!(t.part.bp.name, "evil");
+        assert!(t.note.contains("changed"), "{}", t.note);
+        t.answer(Ask::New, "nul 4 4 1".into());
+        assert_eq!(t.part.bp.name, "_nul");
     }
 }

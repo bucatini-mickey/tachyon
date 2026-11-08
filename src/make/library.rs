@@ -41,6 +41,87 @@ pub fn rgb(s: &str) -> Option<Rgb> {
     (v.len() == 3).then(|| Rgb(v[0], v[1], v[2]))
 }
 
+// ---- what may be typed: keep the text format and file paths safe -------------------------------
+//
+// A `.tlib` line splits its fields at " | " and the tags at spaces, so those characters
+// typed into a name, tag or glyph would not read back the same. These checks return
+// `Err(note)` (a sentence to show the user) instead of accepting the text.
+// Rust note: `Result<(), String>` is "worked, nothing to return" or "failed, here is why";
+// callers use `match` or `if let Err(note) = ...` to handle both.
+
+/// A material or kind name: not empty, no `|` (it separates the fields). Spaces are kept
+/// legal ("stone block" is in the starter set): the name is only the text before the first " | ".
+pub fn check_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        Err("A name cannot be empty".into())
+    } else if name.contains('|') {
+        Err(format!("No | in names (it splits the library line): {name}"))
+    } else if name.chars().any(char::is_control) {
+        Err("No control characters in names".into())
+    } else {
+        Ok(())
+    }
+}
+
+/// One tag: no `|`, and no space (a space would make it two tags).
+pub fn check_tag(tag: &str) -> Result<(), String> {
+    if tag.contains('|') {
+        Err(format!("No | in tags: {tag}"))
+    } else if tag.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        Err(format!("No spaces in a tag: {tag:?}"))
+    } else {
+        Ok(())
+    }
+}
+
+/// A glyph: never a space (reading back drops spaces, sliding the floor glyph into the wall
+/// slot). A material's floor glyph cannot be `|` either (it would read as a field separator);
+/// a wall or thing glyph can (a mast).
+pub fn check_glyph(c: char, floor: bool) -> Result<(), String> {
+    if c.is_whitespace() || c.is_control() {
+        Err("A glyph cannot be a space".into())
+    } else if floor && c == '|' {
+        Err("A floor glyph cannot be | (it splits the library line)".into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Windows will not make files with these names, with or without an extension.
+const RESERVED: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+    "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+/// Makes a part, art or project name safe as a file name: no slashes or other characters
+/// Windows refuses, no `..`, no reserved device names. Returns the clean name and whether
+/// anything changed (so the caller can say so). Never returns an empty name.
+pub fn clean_file_name(raw: &str) -> (String, bool) {
+    let s: String = raw
+        .trim()
+        .chars()
+        .map(|c| if c.is_whitespace() || c.is_control() || "\\/:*?\"<>|".contains(c) { '-' } else { c })
+        .collect();
+    // `..` climbs out of the folder: squeeze every run of dots to one.
+    let mut s = s;
+    while s.contains("..") {
+        s = s.replace("..", ".");
+    }
+    // A leading dot hides the file; a trailing dot is dropped by Windows.
+    let s = s.trim_matches(|c| c == '.' || c == '-');
+    let mut s: String = s.chars().take(64).collect();
+    if s.is_empty() {
+        s = "untitled".into();
+    }
+    // "con.txt" is reserved too, so test the part before the first dot.
+    let stem = s.split('.').next().unwrap_or("").to_ascii_lowercase();
+    if RESERVED.contains(&stem.as_str()) {
+        s = format!("_{s}");
+    }
+    let changed = s != raw;
+    (s, changed)
+}
+
 /// `material oak | # . | 140 100 60 | 50 34 20 | wood` and `kind cannon | o | 70 70 76 | metal heavy`.
 pub fn parse_library(text: &str) -> Vec<Entry> {
     let mut out = Vec::new();
