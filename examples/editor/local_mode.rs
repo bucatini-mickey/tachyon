@@ -423,7 +423,7 @@ impl Editor {
         let Some((lo, w, h, d)) = l.sel_box() else { return };
         let bp = Blueprint::capture(&name, &l.scene.world, &l.scene.things, lo, w, h, d);
         let path = format!("{BLUEPRINTS}/{name}.tbp");
-        if let Err(e) = std::fs::write(&path, bp.to_text()) {
+        if let Err(e) = tachyon::library::write_atomic(std::path::Path::new(&path), &bp.to_text()) {
             self.say(format!("Couldn't save {path}: {e}"));
             return;
         }

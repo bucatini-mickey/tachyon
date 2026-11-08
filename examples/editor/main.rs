@@ -111,7 +111,7 @@ impl Editor {
     }
 
     pub fn save(&mut self) {
-        match std::fs::write(&self.path, self.atlas.to_text()) {
+        match tachyon::library::write_atomic(std::path::Path::new(&self.path), &self.atlas.to_text()) {
             Ok(()) => {
                 self.dirty = false;
                 let p = self.path.clone();

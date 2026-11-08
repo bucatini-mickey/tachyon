@@ -123,9 +123,12 @@ pub fn clean_file_name(raw: &str) -> (String, bool) {
 }
 
 /// `material oak | # . | 140 100 60 | 50 34 20 | wood` and `kind cannon | o | 70 70 76 | metal heavy`.
-pub fn parse_library(text: &str) -> Vec<Entry> {
+/// Lines that do not start with `material` or `kind` are comments. A bad line is an error
+/// naming its line number; nothing is half-read.
+pub fn parse_library(text: &str) -> Result<Vec<Entry>, String> {
     let mut out = Vec::new();
-    for line in text.lines() {
+    for (i, line) in text.lines().enumerate() {
+        let n = i + 1;
         let line = line.trim();
         let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
         if word != "material" && word != "kind" {
@@ -133,18 +136,59 @@ pub fn parse_library(text: &str) -> Vec<Entry> {
         }
         // Fields part at " | ", so a glyph can itself be a | (a mast).
         let f: Vec<&str> = rest.split(" | ").map(|s| s.trim().trim_end_matches(" |")).collect();
-        let glyphs: Vec<char> = f.get(1).unwrap_or(&"?").chars().filter(|c| *c != ' ').collect();
+        if f[0].is_empty() {
+            return Err(format!("line {n}: {word} has no name"));
+        }
+        let glyphs: Vec<char> = match f.get(1) {
+            Some(g) => g.chars().filter(|c| *c != ' ').collect(),
+            None => return Err(format!("line {n}: {word} {} has no glyph (expected '{word} name | glyph | ink | paper | tags')", f[0])),
+        };
+        let most = if word == "kind" { 1 } else { 2 };
+        if glyphs.is_empty() || glyphs.len() > most {
+            return Err(format!("line {n}: {word} {} needs 1 to {most} glyph(s), found {}", f[0], glyphs.len()));
+        }
+        let colour = |k: usize, default: Rgb, what: &str| -> Result<Rgb, String> {
+            match f.get(k) {
+                None => Ok(default),
+                Some(s) if s.is_empty() => Ok(default),
+                Some(s) => rgb(s).ok_or(format!("line {n}: {what} colour '{s}' is not three numbers 0-255")),
+            }
+        };
+        let fg = colour(2, DEFAULT_INK, "ink")?;
+        let bg = colour(3, DEFAULT_BG, "paper")?;
         out.push(Entry {
             kind: word == "kind",
             name: f[0].to_string(),
-            glyph: *glyphs.first().unwrap_or(&'?'),
+            glyph: glyphs[0],
             floor: *glyphs.get(1).unwrap_or(&'.'),
-            fg: f.get(2).and_then(|s| rgb(s)).unwrap_or(DEFAULT_INK),
-            bg: f.get(3).and_then(|s| rgb(s)).unwrap_or(DEFAULT_BG),
+            fg,
+            bg,
             tags: f.get(4).map(|s| s.split_whitespace().map(String::from).collect()).unwrap_or_default(),
         });
     }
-    out
+    Ok(out)
+}
+
+/// Writes a file so a crash cannot leave it cut short: the text goes to `<name>.tmp` beside it,
+/// is flushed to disk, then renamed over the target (a rename replaces the old file in one step).
+/// Rust note: the suffix is appended to the whole file name (not `with_extension`, which would
+/// swap `.tpart` for `.tmp` and let two files share one temp name).
+pub fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
+    let done = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if done.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done
 }
 
 pub fn library_text(project: &str, lib: &[Entry]) -> String {
@@ -229,14 +273,27 @@ impl Part {
         s
     }
     pub fn from_text(text: &str) -> Result<Part, String> {
-        let bp = Blueprint::from_text(text)?;
+        let (bp, used) = Blueprint::parse(text)?;
         let mut sockets = Vec::new();
-        for line in text.lines().skip_while(|l| l.trim() != "end") {
+        for (i, line) in text.lines().enumerate().skip(used) {
+            let n = i + 1;
             let v: Vec<&str> = line.split_whitespace().collect();
-            if v.first() == Some(&"socket") && v.len() >= 5 {
-                let n = |i: usize| v[i].parse::<i32>().unwrap_or(0);
-                sockets.push(Socket { x: n(1), y: n(2), z: n(3), dir: DIRS.iter().position(|d| *d == v[4]).unwrap_or(0), tag: v.get(5).unwrap_or(&"any").to_string() });
+            if v.is_empty() || v[0].starts_with('#') {
+                continue;
             }
+            if v[0] != "socket" {
+                return Err(format!("line {n}: unknown line '{}' after end", v[0]));
+            }
+            if v.len() < 5 {
+                return Err(format!("line {n}: socket needs x y z direction [tag], found {} field(s)", v.len() - 1));
+            }
+            let c = |k: usize| v[k].parse::<i32>().map_err(|e| format!("line {n}: bad socket number '{}': {e}", v[k]));
+            let (x, y, z) = (c(1)?, c(2)?, c(3)?);
+            let dir = DIRS.iter().position(|d| *d == v[4]).ok_or(format!("line {n}: unknown direction '{}' (use n, e, s, w, up or down)", v[4]))?;
+            if x < 0 || y < 0 || z < 0 || x >= bp.w || y >= bp.h || z >= bp.d {
+                return Err(format!("line {n}: socket at {x} {y} {z} is outside the part ({} x {} x {})", bp.w, bp.h, bp.d));
+            }
+            sockets.push(Socket { x, y, z, dir, tag: v.get(5).unwrap_or(&"any").to_string() });
         }
         Ok(Part { bp, sockets })
     }
@@ -326,33 +383,76 @@ impl Art {
         s + "end\n"
     }
     pub fn from_text(text: &str) -> Result<Art, String> {
-        let mut lines = text.lines();
-        if !lines.next().unwrap_or("").starts_with("tachyon-art") {
-            return Err("not Tachyon art".into());
+        let mut lines = text.lines().enumerate().map(|(i, l)| (i + 1, l.trim_end_matches('\r')));
+        if !lines.next().map_or(false, |l| l.1.starts_with("tachyon-art")) {
+            return Err("line 1: not Tachyon art (no 'tachyon-art' header)".into());
         }
         let (mut name, mut w, mut h) = (String::from("art"), 0, 0);
         let mut cols: Vec<(char, Rgb)> = Vec::new();
         let mut grids: Vec<Vec<Vec<char>>> = Vec::new();
-        while let Some(l) = lines.next() {
+        let mut last = 1;
+        let mut ended = false;
+        while let Some((n, l)) = lines.next() {
+            last = n;
+            if l.trim().is_empty() || l.starts_with('#') {
+                continue;
+            }
             let (word, rest) = l.split_once(' ').unwrap_or((l, ""));
             match word {
                 "name" => name = rest.into(),
                 "size" => {
-                    let v: Vec<i32> = rest.split_whitespace().filter_map(|x| x.parse().ok()).collect();
-                    (w, h) = (*v.first().unwrap_or(&0), *v.get(1).unwrap_or(&0));
+                    let v: Vec<&str> = rest.split_whitespace().collect();
+                    if v.len() != 2 {
+                        return Err(format!("line {n}: size needs width and height"));
+                    }
+                    let num = |s: &str| s.parse::<i32>().map_err(|e| format!("line {n}: bad number '{s}': {e}"));
+                    (w, h) = (num(v[0])?, num(v[1])?);
+                    if w < 1 || h < 1 {
+                        return Err(format!("line {n}: size must be at least 1 x 1, got {w} x {h}"));
+                    }
+                    if w > ART_MAX_SIDE || h > ART_MAX_SIDE || (w as i64) * (h as i64) > ART_MAX_CELLS {
+                        return Err(format!("line {n}: size {w} x {h} is too big (at most {ART_MAX_SIDE} on a side and {ART_MAX_CELLS} cells)"));
+                    }
                 }
                 "color" => {
                     let mut it = rest.splitn(2, ' ');
-                    let k = it.next().and_then(|k| k.chars().next()).unwrap_or('a');
-                    cols.push((k, rgb(it.next().unwrap_or("")).unwrap_or(DEFAULT_INK)));
+                    let k = it.next().and_then(|k| k.chars().next()).ok_or(format!("line {n}: color needs a key and three numbers"))?;
+                    let c = rgb(it.next().unwrap_or("")).ok_or(format!("line {n}: color {k} needs three numbers 0-255"))?;
+                    cols.push((k, c));
                 }
-                "glyphs" | "ink" | "paper" => grids.push((0..h).map(|_| lines.next().unwrap_or("").chars().collect()).collect()),
-                "end" => break,
-                _ => {}
+                "glyphs" | "ink" | "paper" => {
+                    if w <= 0 || h <= 0 {
+                        return Err(format!("line {n}: '{word}' rows come before the size"));
+                    }
+                    let mut rows = Vec::new();
+                    for y in 0..h {
+                        let (rn, row) = lines.next().ok_or(format!("line {n}: '{word}' ends early (row {y} is missing)"))?;
+                        last = rn;
+                        let row: Vec<char> = row.chars().collect();
+                        if row.len() > w as usize {
+                            return Err(format!("line {rn}: row is {} wide but the art is {w} wide", row.len()));
+                        }
+                        if word != "glyphs" {
+                            if let Some(k) = row.iter().find(|k| **k != ' ' && !cols.iter().any(|c| c.0 == **k)) {
+                                return Err(format!("line {rn}: colour key '{k}' has no color line"));
+                            }
+                        }
+                        rows.push(row);
+                    }
+                    grids.push(rows);
+                }
+                "end" => {
+                    ended = true;
+                    break;
+                }
+                other => return Err(format!("line {n}: unknown line '{other}'")),
             }
         }
-        if w <= 0 || h <= 0 || grids.len() < 3 {
-            return Err("art has no size or rows".into());
+        if w <= 0 || h <= 0 || grids.len() != 3 {
+            return Err("art has no size or does not have exactly glyphs, ink and paper rows".into());
+        }
+        if !ended {
+            return Err(format!("line {}: the file stops before 'end' (cut short?)", last + 1));
         }
         let col = |k: char| cols.iter().find(|c| c.0 == k).map(|c| c.1).unwrap_or(DEFAULT_INK);
         let mut art = Art::new(&name, w, h);
@@ -365,3 +465,7 @@ impl Art {
         Ok(art)
     }
 }
+
+/// Largest art a loaded file may claim (see `MAX_SIDE` for blueprints).
+pub const ART_MAX_SIDE: i32 = 1024;
+pub const ART_MAX_CELLS: i64 = 1 << 20;

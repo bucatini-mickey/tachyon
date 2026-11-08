@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use tachyon::blueprint::BpCell;
 // The file formats live in the engine now (src/make/library.rs). `use` brings names into
 // scope; they are only reachable because the engine marks them `pub`.
-use tachyon::library::{check_glyph, check_name, check_tag, clean_file_name, library_text, parse_library, rgb, Art, Entry, Part, Socket, DIRS, PALETTE, SEED_LIBRARY};
+use tachyon::library::{write_atomic, check_glyph, check_name, check_tag, clean_file_name, library_text, parse_library, rgb, Art, Entry, Part, Socket, DIRS, PALETTE, SEED_LIBRARY};
 use tachyon::prelude::*;
 use tachyon::tile::Tile;
 
@@ -308,9 +308,9 @@ impl Tokamak {
         fs::create_dir_all(dir.join("art"))?;
         let lib_path = dir.join("library.tlib");
         if !lib_path.exists() {
-            fs::write(&lib_path, SEED_LIBRARY)?;
+            write_atomic(&lib_path, SEED_LIBRARY)?;
         }
-        let fresh = Tokamak::blank(project, parse_library(&fs::read_to_string(&lib_path)?));
+        let fresh = Tokamak::blank(project, parse_library(&fs::read_to_string(&lib_path)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", lib_path.display())))?);
         let mode = self.mode;
         *self = fresh;
         self.mode = mode;
@@ -481,7 +481,7 @@ impl Tokamak {
         if let Some(d) = path.parent() {
             let _ = fs::create_dir_all(d);
         }
-        self.note = match fs::write(&path, text) {
+        self.note = match write_atomic(&path, &text) {
             Ok(_) => {
                 self.dirty[mode.i()] = false;
                 format!("Saved {}", path.display())
@@ -1511,7 +1511,7 @@ mod tests {
     use tachyon::blueprint::Blueprint;
 
     fn shop() -> Tokamak {
-        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY));
+        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY).unwrap());
         t.part = Part::new("p", 8, 6, 2);
         t
     }
@@ -1530,12 +1530,12 @@ mod tests {
 
     #[test]
     fn library_round_trips() {
-        let lib = parse_library(SEED_LIBRARY);
+        let lib = parse_library(SEED_LIBRARY).unwrap();
         assert!(lib.iter().any(|e| e.name == "stone block" && !e.kind && e.glyph == '#' && e.floor == '.'));
         assert!(lib.iter().any(|e| e.name == "cannon" && e.kind && e.glyph == 'o'));
         let mast = lib.iter().find(|e| e.name == "mast").unwrap();
         assert_eq!((mast.glyph, mast.fg, mast.tags.join(" ").as_str()), ('|', Rgb(200, 170, 110), "ship"));
-        let again = parse_library(&library_text("t", &lib));
+        let again = parse_library(&library_text("t", &lib)).unwrap();
         assert_eq!(again.len(), lib.len());
         assert_eq!(again[0].fg, lib[0].fg);
     }
@@ -1669,7 +1669,7 @@ mod name_tests {
 
     #[test]
     fn typing_a_bar_or_space_into_the_library_shows_a_note_and_changes_nothing() {
-        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY));
+        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY).unwrap());
         let (name, tags, glyph) = (t.lib[0].name.clone(), t.lib[0].tags.clone(), t.lib[0].glyph);
         t.answer(Ask::Rename, "a | b".into());
         assert_eq!(t.lib[0].name, name);
@@ -1687,7 +1687,7 @@ mod name_tests {
 
     #[test]
     fn a_new_part_name_is_cleaned_and_the_note_says_so() {
-        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY));
+        let mut t = Tokamak::blank("test", parse_library(SEED_LIBRARY).unwrap());
         t.answer(Ask::New, "..\\evil 4 4 1".into());
         assert_eq!(t.part.bp.name, "evil");
         assert!(t.note.contains("changed"), "{}", t.note);

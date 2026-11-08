@@ -231,35 +231,52 @@ impl Blueprint {
     }
 
     pub fn from_text(text: &str) -> Result<Blueprint, String> {
-        let mut lines = text.lines();
-        let first = lines.next().ok_or("empty file")?;
+        Blueprint::parse(text).map(|(bp, _)| bp)
+    }
+
+    /// Reads a blueprint and also says how many lines it used (up to and including `end`), so
+    /// `Part::from_text` can carry on from there with correct line numbers. Every error names
+    /// its line ("line 7: ..."). A size is checked before anything is allocated.
+    pub fn parse(text: &str) -> Result<(Blueprint, usize), String> {
+        let mut lines = text.lines().enumerate().map(|(i, l)| (i + 1, l.trim_end_matches(char::from(13))));
+        let first = lines.next().ok_or("empty file")?.1;
         if !first.starts_with("tachyon-blueprint") {
-            return Err("not a blueprint (no 'tachyon-blueprint' header)".into());
+            return Err("line 1: not a blueprint (no 'tachyon-blueprint' header)".into());
         }
         let mut bp = Blueprint { name: String::new(), w: 0, h: 0, d: 0, cells: Vec::new() };
         let mut keys: Vec<(char, BpCell)> = Vec::new();
-        let num = |s: &str| s.trim().parse::<i32>().map_err(|e| format!("bad number '{s}': {e}"));
-        while let Some(line) = lines.next() {
-            let line = line.trim_end_matches('\r');
+        let mut used = 1;
+        let mut ended = false;
+        while let Some((n, line)) = lines.next() {
+            used = n;
             if line.starts_with('#') || line.trim().is_empty() {
                 continue;
             }
+            let num = |s: &str| s.trim().parse::<i32>().map_err(|e| format!("line {n}: bad number '{s}': {e}"));
             let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
             match word {
                 "name" => bp.name = rest.to_string(),
                 "size" => {
                     let v: Vec<&str> = rest.split_whitespace().collect();
                     if v.len() != 3 {
-                        return Err("size needs width, height and levels".into());
+                        return Err(format!("line {n}: size needs width, height and levels"));
                     }
-                    bp.w = num(v[0])?;
-                    bp.h = num(v[1])?;
-                    bp.d = num(v[2])?;
-                    bp.cells = vec![None; (bp.w * bp.h * bp.d) as usize];
+                    let (w, h, d) = (num(v[0])?, num(v[1])?, num(v[2])?);
+                    if w < 1 || h < 1 || d < 1 {
+                        return Err(format!("line {n}: size must be at least 1 in each direction, got {w} {h} {d}"));
+                    }
+                    if w > MAX_SIDE || h > MAX_SIDE || d > MAX_SIDE || (w as i64) * (h as i64) * (d as i64) > MAX_CELLS {
+                        return Err(format!("line {n}: size {w} {h} {d} is too big (at most {MAX_SIDE} on a side and {MAX_CELLS} cells)"));
+                    }
+                    (bp.w, bp.h, bp.d) = (w, h, d);
+                    bp.cells = vec![None; (w * h * d) as usize];
                 }
                 "key" => {
                     let mut chars = rest.chars();
-                    let ch = chars.next().ok_or("key needs a character")?;
+                    let ch = chars.next().ok_or(format!("line {n}: key needs a character"))?;
+                    if ch == ' ' {
+                        return Err(format!("line {n}: a key cannot be a space"));
+                    }
                     let rest: String = chars.collect();
                     let (body, things) = match rest.split_once('|') {
                         Some((b, t)) => (b, t.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()),
@@ -267,33 +284,50 @@ impl Blueprint {
                     };
                     let body = body.trim();
                     let (tw, mat) = body.split_once(' ').unwrap_or((body, ""));
-                    let tile = parse_tile(tw).ok_or(format!("unknown tile '{tw}' (use open, floor, wall, ramp, stair-up, stair-down, stair-updown)"))?;
+                    let tile = parse_tile(tw).ok_or(format!("line {n}: unknown tile '{tw}' (use open, floor, wall, ramp, stair-up, stair-down, stair-updown)"))?;
                     keys.push((ch, BpCell { tile, mat: mat.trim().to_string(), things }));
                 }
                 "level" => {
+                    if bp.cells.is_empty() {
+                        return Err(format!("line {n}: level comes before size"));
+                    }
                     let z = num(rest)?;
                     if z < 0 || z >= bp.d {
-                        return Err(format!("level {z} is outside size"));
+                        return Err(format!("line {n}: level {z} is outside size"));
                     }
                     for y in 0..bp.h {
-                        let row = lines.next().ok_or("level ends early")?.trim_end_matches('\r');
-                        for (x, ch) in row.chars().enumerate().take(bp.w as usize) {
+                        let (rn, row) = lines.next().ok_or(format!("line {n}: level {z} ends early (row {y} is missing)"))?;
+                        used = rn;
+                        if row.chars().count() > bp.w as usize {
+                            return Err(format!("line {rn}: row is {} wide but the part is {} wide", row.chars().count(), bp.w));
+                        }
+                        for (x, ch) in row.chars().enumerate() {
                             if ch == ' ' {
                                 continue;
                             }
-                            let c = keys.iter().find(|(k, _)| *k == ch).ok_or(format!("character '{ch}' has no key"))?;
+                            let c = keys.iter().find(|(k, _)| *k == ch).ok_or(format!("line {rn}: character '{ch}' has no key"))?;
                             let i = bp.idx(x as i32, y, z);
                             bp.cells[i] = Some(c.1.clone());
                         }
                     }
                 }
-                "end" => break,
-                other => return Err(format!("unknown line '{other}'")),
+                "end" => {
+                    ended = true;
+                    break;
+                }
+                other => return Err(format!("line {n}: unknown line '{other}'")),
             }
         }
         if bp.cells.is_empty() {
             return Err("blueprint has no size".into());
         }
-        Ok(bp)
+        if !ended {
+            return Err(format!("line {}: the file stops before 'end' (cut short?)", used + 1));
+        }
+        Ok((bp, used))
     }
 }
+
+/// Largest side and cell count a loaded blueprint may claim, so a corrupt size cannot ask for gigabytes.
+pub const MAX_SIDE: i32 = 512;
+pub const MAX_CELLS: i64 = 1 << 20;

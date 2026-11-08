@@ -20,7 +20,7 @@ What it is today: a terminal workshop with three tabs. Part (paint a blueprint c
 8. **The `tokamak/` folder is untracked in git.** The Broadside project (library.tlib, empty art/ and parts/) and the `.last` file have no history or backup. Decide: commit projects, or add a backup/export step.
 9. **Library text can be corrupted by typing.** Rename and tags accept `|`; the file format splits on " | ", so a name like `a | b` breaks the entry on reload. A glyph set to space is saved, then read back wrong (spaces are filtered when parsing, so the floor glyph slides into the wall slot). Fix: reject `|` and space in names, tags and glyphs.
 10. **Names go straight into file paths.** Part, art and project names are not cleaned, so `..\x` writes outside the folder and `a/b` fails with "Could not save" (project names from the picker only swap spaces for `-`). Windows-reserved names (`con`, `nul`) will also misbehave.
-11. **Corrupt files are only half-checked.** `Part::from_text` ignores short socket lines, quietly turns an unknown direction into `n`, and accepts sockets outside the part's bounds. A blueprint with a negative size would try to allocate a huge Vec. Fix: validate on load and report line numbers.
+11. **Corrupt files are only half-checked.** (DONE tach-011) `Part::from_text` ignores short socket lines, quietly turns an unknown direction into `n`, and accepts sockets outside the part's bounds. A blueprint with a negative size would try to allocate a huge Vec. Fix: validate on load and report line numbers.
 12. **Renaming or deleting a library entry orphans parts.** Parts store material and thing names as text, so after a rename the part draws those cells in red (the "unknown" colour) and nothing warns or offers to update the parts.
 
 ## C. Unclear or broken keys
@@ -46,7 +46,7 @@ What it is today: a terminal workshop with three tabs. Part (paint a blueprint c
 ## E. Housekeeping
 
 27. **Paths are relative to the working directory** (`"tokamak"`, `"tokamak/.last"`). `tokamak.bat` does `cd` first, but `cargo run --example tokamak` from another folder makes a second, empty `tokamak/` there.
-28. **Saves are plain `fs::write`** (no temp file then rename), so a crash mid-save can truncate a file. No auto-save and no recovery file.
+28. **Saves are plain `fs::write`** (temp+rename DONE tach-011; no auto-save yet) (no temp file then rename), so a crash mid-save can truncate a file. No auto-save and no recovery file.
 29. **Tests cover the logic, not input.** No test drives `on_key`/`on_mouse` (one would have caught item 13), and none opens a malformed file.
 30. **Good as found:** the terminal is restored on panic, the loop redraws only on input, unsaved-work prompts work on quit/new/open/project switch, and all draw paths survive tiny windows.
 
