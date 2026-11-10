@@ -178,6 +178,8 @@ export interface TermOptions {
 	onDraw: (t: Term) => void;
 	/** Desktop keys (PageUp, Escape...) not typed into the entry field. */
 	onKey?: (key: string, ev: KeyboardEvent) => void;
+	/** A mouse moving over the grid: the cell under it (null when it leaves). */
+	onHover?: (cell: { x: number; y: number } | null) => void;
 }
 
 const esc = (c: string) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c);
@@ -232,7 +234,9 @@ export class Term extends Grid {
 			+ '.pt-row i{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-style:normal;overflow:hidden;vertical-align:top}'
 			// (a bold glyph keeps to its cell, so the row stays on the grid)
 			+ '.pt-row b{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-weight:900;vertical-align:top}'
-			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}';
+			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}'
+			// (one outside ASCII, a face, fills the square its two columns make)
+			+ '.pt-row i.f{display:inline-flex;align-items:center;justify-content:center;font-size:1.5em;line-height:1}';
 		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
 		this.pre.style.cssText = 'margin:0;font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
@@ -263,6 +267,12 @@ export class Term extends Grid {
 			this.tapAt = { x, y };
 			if (fn) fn();
 		});
+		this.pre.addEventListener('pointermove', (ev) => {
+			if (ev.pointerType !== 'mouse' || !this.opts.onHover) return;
+			const b = this.pre.getBoundingClientRect();
+			this.opts.onHover({ x: Math.floor((ev.clientX - b.left) / this.cw), y: Math.floor((ev.clientY - b.top) / this.lh) });
+		});
+		this.pre.addEventListener('pointerleave', () => this.opts.onHover?.(null));
 		doc.addEventListener('keydown', (ev) => {
 			if (ev.target === this.input || ev.ctrlKey || ev.metaKey || ev.altKey) return;
 			this.opts.onKey?.(ev.key, ev);
@@ -298,6 +308,14 @@ export class Term extends Grid {
 	setCols(cols: number) {
 		if ((this.opts.cols ?? 44) === cols) return;
 		this.opts.cols = cols;
+		this.fit();
+	}
+
+	/** Change the largest font and the fewest rows (a screen that wants bigger cells); refits when they change. */
+	setScale(maxFont: number, rows: number) {
+		if ((this.opts.maxFont ?? 24) === maxFont && (this.opts.rows ?? 24) === rows) return;
+		this.opts.maxFont = maxFont;
+		this.opts.rows = rows;
 		this.fit();
 	}
 
@@ -375,7 +393,7 @@ export class Term extends Grid {
 					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${p[c.bg] ?? p[0]}">`);
 					cur = key;
 				}
-				if (c.wide) { out.push(`<i class="w">${esc(c.ch)}</i>`); x++; }
+				if (c.wide) { out.push(/[^\x00-\x7e]/.test(c.ch) ? `<i class="w f">${esc(c.ch)}\uFE0E</i>` : `<i class="w">${esc(c.ch)}</i>`); x++; }
 				// Half blocks are painted as two exact halves of colour, so pixel pictures have no seams.
 				else if (c.ch === '▀' || c.ch === '▄') {
 					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], p[c.bg] ?? p[0]] : [p[c.bg] ?? p[0], p[c.fg] ?? p[4]];
