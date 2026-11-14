@@ -248,7 +248,9 @@ fn burn(w: &mut World, i: usize, x: i32, y: i32, z: i32, layer: usize, rng: &mut
         let m = w.mats.get(w.mat[i]);
         if let Some(ig) = m.ignite {
             if w.temp[i] > ig {
-                w.fire[i] = m.burn_ticks.max(1);
+                let burn = m.burn_ticks.max(1);
+                w.note_ignition(i);
+                w.fire[i] = burn;
                 w.touch(i);
             }
         }
@@ -266,7 +268,6 @@ fn burn(w: &mut World, i: usize, x: i32, y: i32, z: i32, layer: usize, rng: &mut
         w.quench(i);
         return;
     }
-    w.fire[i] = fire - 1;
     w.touch(i);
     let gas = w.mats.get(w.mat[i]).burn_gas;
     if gas != AIR && rng.chance(0.5) {
@@ -301,6 +302,9 @@ fn burn(w: &mut World, i: usize, x: i32, y: i32, z: i32, layer: usize, rng: &mut
             w.ignite(n);
         }
     }
+    // Burn down after spreading, so a cell's last flicker still counts as
+    // burning when it lights its neighbour (that is spread, not a new fire).
+    w.fire[i] = fire - 1;
     if fire == 1 {
         burn_out(w, i, z, layer);
     }

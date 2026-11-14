@@ -2,10 +2,10 @@
 //! clock and the physics state. A game can hold several (a world map and the
 //! local area you are in, a ship and the sea around it).
 
-use crate::clock::Clock;
+use crate::clock::{Clock, Span};
 use crate::sim::Sim;
 use crate::geom::Pos;
-use crate::life::Life;
+use crate::life::{Life, LifeEvent};
 use crate::projectile::{BlastReport, Flight, Projectile};
 use crate::things::{KindId, ThingId, Things};
 use crate::vessel::Vessel;
@@ -51,9 +51,9 @@ impl Scene {
     /// Advance the physics one tick.
     pub fn tick(&mut self) {
         self.world.ambient = self.clock.ambient_temp();
-        self.weather.apply(&mut self.world, self.clock.tick);
+        self.weather.apply(&mut self.world, &self.clock);
         self.sim.step(&mut self.world, self.clock.tick);
-        crate::sim::flames::step(&self.world, &mut self.things, &mut self.sim.rng);
+        crate::sim::flames::step(&self.world, &mut self.things, &mut self.sim.rng, self.clock.secs_per_tick as f32);
         for v in &mut self.vessels {
             v.step(&mut self.world, &mut self.things);
         }
@@ -102,4 +102,64 @@ impl Scene {
             self.tick();
         }
     }
+
+    /// Run time on without drawing (sleep, a long job, travel) for up to
+    /// `span` of game time, stopping early after the first tick in which one
+    /// of the `stop` events happened. Every system ticks as usual, so fire and
+    /// water behave exactly as they would at normal speed; it is only quicker
+    /// because nothing is drawn. Events pile up in `self.events` and
+    /// `self.life.events` for the game to report afterwards.
+    pub fn fast_forward(&mut self, span: Span, stop: StopOn) -> Forwarded {
+        let n = self.clock.ticks_in(span);
+        for done in 1..=n {
+            let (life0, scene0, fires0) = (self.life.events.len(), self.events.len(), self.world.fires_started);
+            self.tick();
+            if let Some(who) = stop.creature {
+                if let Some(e) = self.life.events[life0..].iter().find(|e| e.who().contains(&who)) {
+                    return Forwarded { ticks: done, stopped: Stopped::Life(e.clone()) };
+                }
+            }
+            if stop.explosion {
+                if let Some(at) = self.events[scene0..].iter().find_map(|e| match e {
+                    SceneEvent::Exploded(at, _) => Some(*at),
+                    _ => None,
+                }) {
+                    return Forwarded { ticks: done, stopped: Stopped::Exploded(at) };
+                }
+            }
+            if stop.fire && self.world.fires_started > fires0 {
+                let at = self.world.last_fire_start.unwrap_or_default();
+                return Forwarded { ticks: done, stopped: Stopped::FireStarted(at) };
+            }
+        }
+        Forwarded { ticks: n, stopped: Stopped::Done }
+    }
+}
+
+/// What ends a [`Scene::fast_forward`] early. `Default` stops on nothing.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StopOn {
+    /// Any `LifeEvent` about this creature (it wakes, is struck, burns...).
+    pub creature: Option<ThingId>,
+    /// Anything exploding.
+    pub explosion: bool,
+    /// A new fire starting anywhere (not a burning fire spreading).
+    pub fire: bool,
+}
+
+/// How a fast-forward ended.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Stopped {
+    /// The whole span ran.
+    Done,
+    Life(LifeEvent),
+    Exploded(Pos),
+    FireStarted(Pos),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Forwarded {
+    /// Ticks actually run.
+    pub ticks: u64,
+    pub stopped: Stopped,
 }

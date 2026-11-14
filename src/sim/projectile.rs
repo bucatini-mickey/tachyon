@@ -139,7 +139,7 @@ pub fn explode(world: &mut World, things: &mut Things, at: Pos, b: &Blast, rng: 
             report.things_destroyed += 1;
         } else if flame && force > 0.0 {
             if let Some(t) = things.get_mut(id) {
-                if t.wet == 0 {
+                if t.wet == 0.0 {
                     t.lit = true;
                 }
             }

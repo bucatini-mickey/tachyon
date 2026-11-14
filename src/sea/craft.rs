@@ -457,11 +457,12 @@ impl Craft {
         }
         self.ahead = 0.0;
         self.couple(sea, dt);
-        // The wind she feels, in her own frame (cells per tick).
+        // The wind she feels, in her own frame (m/s; the weather turns it
+        // into cells per tick with the scene's clock).
         let (fwd, stb) = self.axes();
         let (ax, ay) = (wind.0 - self.vx, wind.1 - self.vy);
         let (lx, ly) = (ax * stb.0 + ay * stb.1, -(ax * fwd.0 + ay * fwd.1));
-        let sp = (lx * lx + ly * ly).sqrt() * dt;
+        let sp = (lx * lx + ly * ly).sqrt();
         self.scene.weather.set_wind(sp, ly.atan2(lx));
         self.scene.tick();
     }

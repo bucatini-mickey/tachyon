@@ -51,11 +51,11 @@ fn torch_goes_out_underwater_and_is_hard_to_light_wet() {
         .count();
     assert!(lit < tries / 10, "a soaked torch lit {lit} times out of {tries}");
 
-    // Once dry, it lights.
-    for _ in 0..flames::SOAKED {
+    // Once dry, it lights (1 s ticks: SOAKED seconds is SOAKED ticks).
+    for _ in 0..flames::SOAKED as u32 {
         s.tick();
     }
-    assert_eq!(s.things.get(t).unwrap().wet, 0);
+    assert_eq!(s.things.get(t).unwrap().wet, 0.0);
     assert_eq!(flames::try_light(&s.world, &mut s.things, t, &mut rng), Lighting::Lit);
 }
 
@@ -84,7 +84,7 @@ fn rain_puts_out_open_flames() {
         s.tick();
     }
     let t = s.things.get(a).unwrap();
-    assert!(!t.lit && t.wet > 0, "rain should put out an open torch and wet it");
+    assert!(!t.lit && t.wet > 0.0, "rain should put out an open torch and wet it");
 }
 
 fn centre_x(world: &World) -> f32 {
@@ -226,7 +226,117 @@ fn no_rain_or_wind_under_a_roof() {
     assert!(!s.world.open_sky[i], "but the weather should not");
     assert_eq!(s.world.fluid[i], 0, "rain fell indoors");
     let th = s.things.get(t).unwrap();
-    assert!(th.lit && th.wet == 0, "a torch indoors was rained on or blown out");
+    assert!(th.lit && th.wet == 0.0, "a torch indoors was rained on or blown out");
+}
+
+/// Game seconds a soaked torch, indoors and cold, takes to dry at this tick.
+fn drying_secs(secs_per_tick: f64) -> f64 {
+    let mut s = field(14, 14);
+    s.clock = Clock::new(secs_per_tick, 12.0);
+    let inside = hut(&mut s);
+    let (torch, _) = torch_kinds(&mut s);
+    let t = s.things.spawn(torch, inside);
+    s.things.get_mut(t).unwrap().wet = flames::SOAKED;
+    let start = s.clock.seconds();
+    while s.things.get(t).unwrap().wet > 0.0 {
+        s.tick();
+        assert!(s.clock.seconds() - start < 10_000.0, "never dried");
+    }
+    s.clock.seconds() - start
+}
+
+#[test]
+fn a_torch_dries_in_the_same_game_time_whatever_the_tick() {
+    let (short, long) = (drying_secs(0.5), drying_secs(2.0));
+    // Within one long tick of each other, and about SOAKED seconds.
+    assert!((short - long).abs() <= 2.0, "0.5 s ticks: {short} s, 2 s ticks: {long} s");
+    assert!((short - flames::SOAKED as f64).abs() <= 2.0, "took {short} s, expected about {}", flames::SOAKED);
+}
+
+#[test]
+fn wind_in_m_s_reaches_the_grid_per_tick_and_gusts_follow_game_time() {
+    let at = |secs_per_tick: f64, ticks: u64| {
+        let mut s = field(10, 10);
+        s.clock = Clock::new(secs_per_tick, 12.0);
+        s.weather.set_wind(0.6, 0.0);
+        s.clock.tick = ticks;
+        s.weather.apply(&mut s.world, &s.clock);
+        s.world.wind
+    };
+    // 60 game seconds in: 120 half-second ticks or 30 two-second ticks.
+    let (a, b) = (at(0.5, 120), at(2.0, 30));
+    assert!((a.0 * 4.0 - b.0).abs() < 1e-4 && (a.1 * 4.0 - b.1).abs() < 1e-4, "same wind in m/s, 4x the cells per tick: {a:?} vs {b:?}");
+}
+
+/// Two firebolts thrown at a wall, the second from further away.
+fn two_bolts(s: &mut Scene) {
+    let bolt = s.things.add_kind(ThingKind::new("bolt", '*', Rgb(255, 200, 90), Layer::Effect));
+    let stone = s.world.mats.id("stone block");
+    for y in 0..10 {
+        s.world.set_tile(Pos::new(20, y, 1), Tile::Wall, stone);
+    }
+    let blast = Blast { radius: 1.5, power: 50.0, heat: 0.0, ignite: 0.0 };
+    for (y, from) in [(3, 14), (7, 2)] {
+        let p = Projectile::launch(&mut s.things, bolt, Pos::new(from, y, 1), Pos::new(20, y, 1), 1.0, blast, None);
+        s.projectiles.push(p);
+    }
+}
+
+#[test]
+fn fast_forward_stops_on_the_first_explosion() {
+    let mut s = field(30, 10);
+    two_bolts(&mut s);
+    let stop = StopOn { explosion: true, ..StopOn::default() };
+    let r = s.fast_forward(Span::hours(1.0), stop);
+    assert_eq!(r.stopped, Stopped::Exploded(Pos::new(19, 3, 1)), "the near bolt bursts first");
+    assert!(r.ticks < 20, "stopped after {} ticks", r.ticks);
+    assert_eq!(s.clock.tick, r.ticks);
+    assert_eq!(s.projectiles.len(), 1, "the far bolt is still flying");
+    assert_eq!(s.events.iter().filter(|e| matches!(e, SceneEvent::Exploded(..))).count(), 1);
+    // Again: now the second one.
+    let r2 = s.fast_forward(Span::hours(1.0), stop);
+    assert_eq!(r2.stopped, Stopped::Exploded(Pos::new(19, 7, 1)));
+    // Nothing left to stop it: the whole span runs.
+    let r3 = s.fast_forward(Span::minutes(2.0), stop);
+    assert_eq!(r3, Forwarded { ticks: 120, stopped: Stopped::Done });
+}
+
+#[test]
+fn fast_forward_stops_on_a_new_fire_but_not_on_one_spreading() {
+    let mut s = field(30, 10);
+    let stop = StopOn { fire: true, ..StopOn::default() };
+    let r = s.fast_forward(Span::minutes(1.0), stop);
+    assert_eq!(r.stopped, Stopped::Done, "nothing burning");
+    for y in 3..7 {
+        s.world.ignite(Pos::new(8, y, 1));
+    }
+    assert_eq!(s.world.fires_started, 1, "four cells in a row are one new fire");
+    // The grass fire spreading is not a new fire...
+    let ash = s.world.mats.id("ash");
+    let r = s.fast_forward(Span::minutes(1.0), stop);
+    assert_eq!(r.stopped, Stopped::Done, "spread counted as a new fire");
+    let reached = (0..s.world.len()).filter(|&i| s.world.fire[i] > 0 || s.world.mat[i] == ash).count();
+    assert!(reached > 4, "the grass should have spread the fire ({reached} cells)");
+    // ...but a hot coal far from it, catching during the run, is.
+    let coal = Pos::new(25, 8, 1);
+    s.world.set_temp(coal, 600.0);
+    let r = s.fast_forward(Span::minutes(1.0), stop);
+    assert_eq!(r.stopped, Stopped::FireStarted(coal));
+    assert!(r.ticks <= 2, "took {} ticks to notice", r.ticks);
+}
+
+#[test]
+fn fast_forward_stops_on_a_life_event_about_the_creature() {
+    let mut s = field(12, 12);
+    let person = s.things.add_kind(ThingKind::new("person", '@', Rgb::WHITE, Layer::Creature).blocking());
+    let human = s.life.add_species(tachyon::life::species::human());
+    let you = s.things.spawn(person, Pos::new(5, 5, 1));
+    s.life.add(you, human, Control::Ai, 1);
+    s.life.get_mut(you).unwrap().mind.asleep = true;
+    let stop = StopOn { creature: Some(you), ..StopOn::default() };
+    let r = s.fast_forward(Span::days(2.0), stop);
+    assert!(matches!(r.stopped, Stopped::Life(LifeEvent::Woke(w)) if w == you), "expected waking, got {:?}", r.stopped);
+    assert!(r.ticks < s.clock.ticks_in(Span::days(2.0)));
 }
 
 #[test]

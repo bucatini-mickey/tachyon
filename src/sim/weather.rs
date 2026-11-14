@@ -6,13 +6,25 @@
 //! The wind then acts through the rest of the engine: it drifts gas (smoke,
 //! steam, fog) under open sky, fans fires downwind, blows out exposed flames,
 //! pushes vessels, and slants the rain.
+//!
+//! Weather runs on game seconds (see the time contract in [`crate::sim`]):
+//! the wind is given in metres per second and the gusts and veer have
+//! periods in seconds, so a game with half-second ticks sees the same gusts
+//! at the same game time as one with two-second ticks. Only at the end is the
+//! wind converted to cells per tick for the cellular automata.
 
+use crate::clock::Clock;
 use crate::noise::value2;
 use crate::world::World;
 
+/// Gusts come and go over these periods (game seconds), the direction
+/// wanders over the last.
+pub const GUST_SECS: (f64, f64) = (7.0, 19.0);
+pub const VEER_SECS: f64 = 110.0;
+
 #[derive(Clone, Debug)]
 pub struct Weather {
-    /// Mean wind speed, cells per tick.
+    /// Mean wind speed, metres per second.
     pub wind_speed: f32,
     /// Direction the wind blows *toward*, in radians (0 = east, PI/2 = south,
     /// since y grows southward).
@@ -31,25 +43,39 @@ impl Weather {
         Weather { wind_speed: 0.0, wind_dir: 0.0, gustiness: 0.5, veer: 0.35, rain: 0.0, seed }
     }
 
-    /// Calm, with the given gusts. Set the wind with [`Weather::set_wind`].
+    /// Set the prevailing wind: `speed` in metres per second, `dir` the
+    /// direction it blows toward (radians).
     pub fn set_wind(&mut self, speed: f32, dir: f32) {
         self.wind_speed = speed;
         self.wind_dir = dir;
     }
 
-    /// Update the world's wind and rain for this tick.
-    pub fn apply(&self, world: &mut World, tick: u64) {
-        let t = tick as f32;
-        // Gusts come and go over ~5-20 ticks; the direction drifts over ~100.
-        let gust = 0.6 * value2(self.seed, t / 7.0, 0.5) + 0.4 * value2(self.seed ^ 0x55, t / 19.0, 3.5);
+    /// The wind right now in metres per second (x, y), gusts and veer
+    /// included. It depends on game seconds only, not on the tick length.
+    pub fn wind_at(&self, secs: f64) -> (f32, f32) {
+        // Noise coordinate in "periods"; wrapped so f32 keeps its precision
+        // over a long game (a jump once every ~5 game days at the shortest).
+        let at = |period: f64| ((secs / period) % 65536.0) as f32;
+        let gust = 0.6 * value2(self.seed, at(GUST_SECS.0), 0.5) + 0.4 * value2(self.seed ^ 0x55, at(GUST_SECS.1), 3.5);
         let speed = self.wind_speed * (1.0 + self.gustiness * (gust * 2.0 - 1.0)).max(0.0);
-        let dir = self.wind_dir + self.veer * (value2(self.seed ^ 0xAA, t / 110.0, 7.5) * 2.0 - 1.0);
-        world.wind = (dir.cos() * speed, dir.sin() * speed);
+        let dir = self.wind_dir + self.veer * (value2(self.seed ^ 0xAA, at(VEER_SECS), 7.5) * 2.0 - 1.0);
+        (dir.cos() * speed, dir.sin() * speed)
+    }
+
+    /// Update the world's wind and rain for this tick. `world.wind` is in
+    /// cells per tick: the wind in m/s times the clock's seconds per tick
+    /// (cells are 1 m).
+    pub fn apply(&self, world: &mut World, clock: &Clock) {
+        // Seconds since the scene began (tick 0), not the time of day.
+        let secs = clock.tick as f64 * clock.secs_per_tick;
+        let (wx, wy) = self.wind_at(secs);
+        let dt = clock.secs_per_tick as f32;
+        world.wind = (wx * dt, wy * dt);
         world.rain = self.rain;
     }
 }
 
-/// Words for a wind speed (cells per tick).
+/// Words for a wind as the grid feels it, in cells per tick (`World::wind`).
 pub fn describe_wind(speed: f32) -> &'static str {
     match speed {
         s if s < 0.05 => "calm",

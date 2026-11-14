@@ -471,7 +471,7 @@ fn a_submerged_flame_goes_dark_and_gives_no_light() {
     let water = world.mats.id("water");
     world.set_fluid(Pos::new(5, 5, 1), water, FULL);
     let mut rng = Rng::new(1);
-    tachyon::sim::flames::step(&world, &mut things, &mut rng);
+    tachyon::sim::flames::step(&world, &mut things, &mut rng, 1.0);
     let mut buf = Vec::new();
     gather_sources(&world, &things, 0, 0, 0, 10, 10, 4, 0, &mut buf);
     assert!(!things.get(id).unwrap().lit);
@@ -492,7 +492,7 @@ fn wet_flames_dry_faster_when_warm() {
     }
     let mut rng = Rng::new(1);
     for _ in 0..100 {
-        tachyon::sim::flames::step(&world, &mut things, &mut rng);
+        tachyon::sim::flames::step(&world, &mut things, &mut rng, 1.0);
     }
     let (warm, cold) = (things.get(a).unwrap().wet, things.get(b).unwrap().wet);
     assert!(warm < cold, "warm torch still {warm} wet, cold one {cold}");
@@ -513,7 +513,7 @@ fn fire_relights_a_dry_flame_but_not_a_soaked_one() {
         world.fire[i] = 50;
     }
     let mut rng = Rng::new(1);
-    tachyon::sim::flames::step(&world, &mut things, &mut rng);
+    tachyon::sim::flames::step(&world, &mut things, &mut rng, 1.0);
     assert!(things.get(dry).unwrap().lit, "a dry torch beside fire did not relight");
     assert!(!things.get(soaked).unwrap().lit, "a soaked torch relit");
 }

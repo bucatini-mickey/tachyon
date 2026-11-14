@@ -26,17 +26,25 @@ fn bench_totals(world: &World) -> (u64, f64) {
 }
 
 const SPEEDS: [f64; 6] = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0];
-/// Prevailing winds `W` cycles through: speed (cells per tick) and the
-/// direction it blows toward (radians; 0 east, PI/2 south). Gusts and
-/// wander come from the weather.
+/// Prevailing winds `W` cycles through: speed (m/s) and the direction it
+/// blows toward (radians; 0 east, PI/2 south). Gusts and wander come from the
+/// weather. At the sandbox's 2 s tick they reach the grid as 0.15 to 1.3
+/// cells per tick, the same as before winds were given in m/s.
 const WINDS: [(f32, f32); 6] = [
     (0.0, 0.0),
-    (0.15, 0.2),
-    (0.35, std::f32::consts::FRAC_PI_2),
-    (0.7, std::f32::consts::PI),
-    (0.5, -std::f32::consts::FRAC_PI_2),
-    (1.3, 0.1),
+    (0.075, 0.2),
+    (0.175, std::f32::consts::FRAC_PI_2),
+    (0.35, std::f32::consts::PI),
+    (0.25, -std::f32::consts::FRAC_PI_2),
+    (0.65, 0.1),
 ];
+/// Game time run per loop tick while you sleep (see `Scene::fast_forward`),
+/// and loop ticks per second meanwhile: 15 sim ticks at 2 s, ten times a
+/// second (five game minutes a second; it was about three).
+const SLEEP_STEP_SECS: f64 = 30.0;
+const SLEEP_TPS: f64 = 10.0;
+/// A fire or blast this close (cells) wakes you.
+const WAKE_RANGE: i32 = 25;
 /// Rain settings `R` cycles through.
 const RAINS: [(&str, f32); 3] = [("dry", 0.0), ("light rain", 0.3), ("heavy rain", 1.0)];
 /// The firebolt: speed in cells per tick, and its explosion.
@@ -493,7 +501,27 @@ fn dir_for(k: &KeyEvent) -> Option<(i32, i32)> {
 
 impl Game for Sandbox {
     fn tick(&mut self) {
-        self.scene.tick();
+        // Asleep, a loop tick runs half a game minute without drawing; it
+        // stops early if something happens to you, or anything blows up or
+        // catches fire. A fire or blast near you wakes you.
+        let mut woken = None;
+        if self.scene.life.get(self.player).is_some_and(|c| c.mind.asleep) {
+            let stop = StopOn { creature: Some(self.player), explosion: true, fire: true };
+            let span = self.scene.clock.span_of_secs(SLEEP_STEP_SECS);
+            let p = self.player_pos();
+            woken = match self.scene.fast_forward(span, stop).stopped {
+                Stopped::Exploded(at) if at.dist2d(p) <= WAKE_RANGE => Some("A blast wakes you!"),
+                Stopped::FireStarted(at) if at.dist2d(p) <= WAKE_RANGE => Some("You wake to the smell of smoke."),
+                _ => None,
+            };
+            if woken.is_some() {
+                if let Some(c) = self.scene.life.get_mut(self.player) {
+                    c.mind.asleep = false;
+                }
+            }
+        } else {
+            self.scene.tick();
+        }
         let events = std::mem::take(&mut self.scene.events);
         for e in events {
             match e {
@@ -514,6 +542,9 @@ impl Game for Sandbox {
             }
         }
         self.report_life();
+        if let Some(m) = woken {
+            self.say(m);
+        }
     }
 
     fn on_key(&mut self, k: KeyEvent) -> Flow {
@@ -619,7 +650,8 @@ impl Game for Sandbox {
                 self.wind = (self.wind + 1) % WINDS.len();
                 self.set_weather();
                 let (speed, _) = WINDS[self.wind];
-                self.say(if speed == 0.0 { "The wind drops.".to_string() } else { format!("The wind changes: {}.", describe_wind(speed)) });
+                let felt = speed * self.scene.clock.secs_per_tick as f32; // cells per tick
+                self.say(if speed == 0.0 { "The wind drops.".to_string() } else { format!("The wind changes: {}.", describe_wind(felt)) });
             }
             Key::Char('R') => {
                 self.rain = (self.rain + 1) % RAINS.len();
@@ -724,7 +756,7 @@ impl Game for Sandbox {
         if self.paused {
             0.0
         } else if asleep {
-            SPEEDS[SPEEDS.len() - 1]
+            SLEEP_TPS // each of these fast-forwards SLEEP_STEP_SECS (see `tick`)
         } else {
             SPEEDS[self.speed]
         }

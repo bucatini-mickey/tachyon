@@ -51,7 +51,7 @@ pub use sim::{projectile, weather};
 /// Everything a game usually needs, in one import.
 pub mod prelude {
     pub use crate::app::{run, Flow, Game, LoopStats};
-    pub use crate::clock::{Clock, Daylight};
+    pub use crate::clock::{Clock, Daylight, Span};
     pub use crate::color::Rgb;
     pub use crate::display::{Charset, Display, Scheme};
     pub use crate::frame::{Cell, Frame};
@@ -65,7 +65,7 @@ pub mod prelude {
     pub use crate::movement::{self, Step};
     pub use crate::projectile::{Blast, Projectile};
     pub use crate::rng::{hash3, Rng};
-    pub use crate::scene::{Scene, SceneEvent};
+    pub use crate::scene::{Forwarded, Scene, SceneEvent, StopOn, Stopped};
     pub use crate::things::{Flame, Food, KindId, Layer, Thing, ThingId, ThingKind, Things};
     pub use crate::tile::Tile;
     pub use crate::vessel::{Afloat, Vessel};

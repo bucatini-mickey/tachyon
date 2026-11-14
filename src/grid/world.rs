@@ -176,13 +176,20 @@ pub struct World {
     pub ambient: f32,
     /// Deep-earth temperature that buried cells drift toward.
     pub ground_temp: f32,
-    /// Wind over open ground, in cells per tick (x, y). Set by `Weather`.
+    /// Wind over open ground, in cells per tick (x, y): the wind in m/s times
+    /// the seconds per tick. Set by `Weather`.
     pub wind: (f32, f32),
     /// Rain, 0 (dry) to 1 (a downpour). Set by `Weather`.
     pub rain: f32,
     /// Terrain changed: sky exposure needs recomputing.
     pub sky_dirty: bool,
     pub wake: Wake,
+    /// New fires so far: cells that caught with no burning neighbour (a
+    /// spark, a blast, a hot coal), not a fire spreading. Only ever counts up;
+    /// compare before and after to notice one (see `Scene::fast_forward`).
+    pub fires_started: u64,
+    /// Where the latest new fire started.
+    pub last_fire_start: Option<Pos>,
 }
 
 impl World {
@@ -213,6 +220,8 @@ impl World {
             rain: 0.0,
             sky_dirty: true,
             wake: Wake::new(w, h, d),
+            fires_started: 0,
+            last_fire_start: None,
         }
     }
 
@@ -442,10 +451,28 @@ impl World {
         if m.ignite.is_none() {
             return false;
         }
-        self.fire[i] = m.burn_ticks.max(1);
-        self.temp[i] = self.temp[i].max(m.ignite.unwrap_or(0.0) + 50.0);
+        let (burn, ig) = (m.burn_ticks.max(1), m.ignite.unwrap_or(0.0));
+        if self.fire[i] == 0 {
+            self.note_ignition(i);
+        }
+        self.fire[i] = burn;
+        self.temp[i] = self.temp[i].max(ig + 50.0);
         self.touch(i);
         true
+    }
+
+    /// Cell `i` is about to catch fire. If nothing within two cells (the
+    /// reach of a fire's heat and sparks) is burning, it is a new fire, not a
+    /// spreading one: count it.
+    pub(crate) fn note_ignition(&mut self, i: usize) {
+        let p = self.pos(i);
+        let spreading = (-2..=2).any(|dz| {
+            (-2..=2).any(|dy| (-2..=2).any(|dx| self.index(p.offset(dx, dy, dz)).is_some_and(|j| self.fire[j] > 0)))
+        });
+        if !spreading {
+            self.fires_started += 1;
+            self.last_fire_start = Some(p);
+        }
     }
 
     /// Put out a fire with water. The water boils off and takes the heat with

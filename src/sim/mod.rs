@@ -5,6 +5,52 @@
 //! Order within a tick: liquids fall and spread, gases rise and spread, then
 //! heat conducts and drives phase changes and fire. Sky exposure is
 //! recomputed when the terrain has changed.
+//!
+//! # The time contract
+//!
+//! One physics tick is one tick of the scene's [`Clock`](crate::clock::Clock),
+//! lasting `secs_per_tick` game seconds. Each game keeps its own tick (decided
+//! 11 Nov: the sandbox uses 2 s, Broadside 0.5 s, tests 1 s). Rates come in
+//! two kinds, and every rate is one or the other:
+//!
+//! **Per tick (cellular automata).** These are steps of a grid rule, so they
+//! cannot follow the clock: a rule moves at most about one cell per tick. In
+//! game time they run faster on a short tick and slower on a long one. At the
+//! reference tick of 1 s (the tests) "per tick" also means "per second".
+//! - Liquid: falls one level and spreads per tick (`fluid::step`); pressure
+//!   equalises per tick (`fluid::pressure`); a [`Source`] gives `rate` units
+//!   per tick; rain drops [`RAIN_DROPS`] per column per tick.
+//! - Heat: conduction between neighbours per tick (`heat::step`), the drift to
+//!   the outdoor and deep-earth temperature, phase changes, and
+//!   `heat::FIRE_HEAT` degrees a burning cell gains per tick.
+//! - Gas: `rise` and `decay` of each gas material are fractions per tick (decay
+//!   four times faster under open sky); sideways diffusion per tick.
+//! - Fire in cells: `Material::burn_ticks` (how long a cell burns), `spread`
+//!   (chance per tick to light a neighbour), rain putting out an exposed fire
+//!   (`rain * 0.06` per tick), wind fanning it (from `World::wind`, cells per
+//!   tick).
+//! - Things in flight: `Projectile` speed in cells per tick; `Scene::effects`
+//!   last a number of ticks; vessels move in cells per tick with per-tick
+//!   `windage` and `drag`. Sky exposure is recomputed at most every 4 ticks.
+//!
+//! **Game seconds (follow the clock).** These are not grid rules, so a game
+//! gets the same result in the same game time whatever its tick:
+//! - Carried flames (`flames`): drying ([`flames::SOAKED`] seconds when
+//!   soaked, four times faster when warm), rain soaking them, rain and gusts
+//!   blowing them out (chances per second, turned into per-tick chances with
+//!   [`flames::chance_in`]), and [`flames::GUST_LIMIT`] in m/s.
+//! - Weather (`weather`): the wind is given in m/s; gusts and veer have periods
+//!   of [`weather::GUST_SECS`] and [`weather::VEER_SECS`] game seconds. The wind
+//!   reaches the grid as `World::wind` in cells per tick (m/s times
+//!   `secs_per_tick`, cells being 1 m), which is the unit the per-tick rules
+//!   above read. Gas drifts at most half a cell per tick, so on any tick a
+//!   strong wind saturates the drift.
+//! - Life (`life`): needs, wounds, bleeding, stains and healing run on game
+//!   seconds and the day length (`Clock::day_secs`, `Span`). Walking is still
+//!   ticks per step until speeds move to m/s.
+//!
+//! [`Scene::fast_forward`](crate::scene::Scene::fast_forward) runs whole ticks
+//! without drawing, so both kinds behave exactly as at normal speed.
 
 pub mod flames;
 pub mod fluid;

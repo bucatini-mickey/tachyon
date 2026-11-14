@@ -166,8 +166,9 @@ pub struct Thing {
     pub name: Option<String>,
     /// A flame thing is burning (things whose kind has no flame ignore this).
     pub lit: bool,
-    /// How soaked it is, in ticks of drying left; a wet torch is hard to light.
-    pub wet: u16,
+    /// How soaked it is, in game seconds of drying left (up to
+    /// `flames::SOAKED`); a wet torch is hard to light.
+    pub wet: f32,
 }
 
 impl Thing {
@@ -237,7 +238,7 @@ impl Things {
     }
 
     pub fn spawn(&mut self, kind: KindId, pos: Pos) -> ThingId {
-        let thing = Thing { kind, pos, open: false, color: None, name: None, lit: true, wet: 0 };
+        let thing = Thing { kind, pos, open: false, color: None, name: None, lit: true, wet: 0.0 };
         let index = if let Some(i) = self.free.pop() {
             self.slots[i as usize].thing = Some(thing);
             i
