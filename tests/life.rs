@@ -74,7 +74,7 @@ fn a_punch_bruises_and_the_bruise_ages_and_heals() {
     let (fresh, old) = (bruise_color(0.0), bruise_color(7.5 * 86400.0));
     assert!(fresh.0 > fresh.2 && old.1 > old.2, "fresh {fresh:?}, old {old:?}");
     for _ in 0..24 * 14 {
-        b.step(&plan, 3600.0, 1.0);
+        b.step(&plan, 3600.0, 1.0, 86400.0);
     }
     assert!(b.parts[arm].wounds.is_empty(), "healed after two weeks");
 }
@@ -108,7 +108,7 @@ fn blades_cut_layers_bleed_clot_and_can_sever() {
     assert!(b.bleeding() > 0.3, "bleeding {}", b.bleeding());
     let mut lost = 0.0;
     for _ in 0..120 {
-        lost += b.step(&plan, 30.0, 1.0);
+        lost += b.step(&plan, 30.0, 1.0, 86400.0);
     }
     assert!(b.bleeding() < 0.01, "clotted after an hour");
     assert!(lost > 50.0 && b.blood > 0.8 * b.max_blood, "lost {lost} ml");
@@ -145,7 +145,7 @@ fn a_stab_to_the_heart_is_fatal() {
     }
     let mut t = 0.0;
     while b.fatal(&plan).is_none() && t < 600.0 {
-        b.step(&plan, 5.0, 1.0);
+        b.step(&plan, 5.0, 1.0, 86400.0);
         t += 5.0;
     }
     assert!(matches!(b.fatal(&plan), Some(Cause::BledOut | Cause::Destroyed(_))), "{:?} after {t} s", b.fatal(&plan));
@@ -402,4 +402,27 @@ fn needs_rise_with_game_time() {
     assert!(after.hunger > before.hunger + 0.2 && after.thirst > before.thirst + 0.3 && after.fatigue > before.fatigue + 0.2, "{before:?} -> {after:?}");
     let words = s.life.describe(&s.things, a);
     assert!(words.iter().any(|(l, _)| l.contains("hungry") || l.contains("peckish")), "{words:?}");
+}
+
+/// Hunger gained over 300 ticks by a player creature in a world whose day is `day_secs` long.
+fn hunger_gain(day_secs: f64) -> f32 {
+    let mut s = field(8, 8);
+    s.clock.day_secs = day_secs;
+    let k = kinds(&mut s);
+    let human = s.life.add_species(species::human());
+    let a = s.things.spawn(k.person, Pos::new(4, 4, 1));
+    s.life.add(a, human, Control::Player, 1);
+    s.tick();
+    let before = s.life.get(a).unwrap().needs.hunger;
+    for _ in 0..300 {
+        s.tick();
+    }
+    s.life.get(a).unwrap().needs.hunger - before
+}
+
+#[test]
+fn a_half_length_day_doubles_hunger_per_tick() {
+    let (full, half) = (hunger_gain(86400.0), hunger_gain(43200.0));
+    assert!(full > 0.0, "{full}");
+    assert!((half / full - 2.0).abs() < 0.01, "{full} vs {half}");
 }

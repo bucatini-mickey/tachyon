@@ -60,14 +60,13 @@ impl Default for Needs {
     }
 }
 
-const DAY: f32 = 86400.0;
 
 impl Needs {
-    pub fn step(&mut self, r: &NeedRates, s: &Surroundings, dt: f32) {
+    pub fn step(&mut self, r: &NeedRates, s: &Surroundings, dt: f32, day: f32) {
         let awake = if s.asleep { 0.6 } else { 1.0 };
-        self.hunger = (self.hunger + r.hunger * awake * dt / DAY).min(1.0);
-        self.thirst = (self.thirst + r.thirst * awake * dt / DAY).min(1.0);
-        self.fatigue = if s.asleep { self.fatigue - 3.0 * r.fatigue * dt / DAY } else { self.fatigue + r.fatigue * dt / DAY }.clamp(0.0, 1.0);
+        self.hunger = (self.hunger + r.hunger * awake * dt / day).min(1.0);
+        self.thirst = (self.thirst + r.thirst * awake * dt / day).min(1.0);
+        self.fatigue = if s.asleep { self.fatigue - 3.0 * r.fatigue * dt / day } else { self.fatigue + r.fatigue * dt / day }.clamp(0.0, 1.0);
         self.starving = if self.hunger >= 1.0 { self.starving + dt } else { 0.0 };
         self.parched = if self.thirst >= 1.0 { self.parched + dt } else { 0.0 };
 
@@ -123,16 +122,16 @@ impl Needs {
         f
     }
 
-    pub fn fatal(&self, underwater: bool) -> Option<Cause> {
+    pub fn fatal(&self, underwater: bool, day: f32) -> Option<Cause> {
         if self.airless > 90.0 {
             Some(if underwater { Cause::Drowned } else { Cause::Suffocated })
         } else if self.temp < 26.0 {
             Some(Cause::Froze)
         } else if self.temp > 43.5 {
             Some(Cause::Overheated)
-        } else if self.parched > 3.0 * DAY {
+        } else if self.parched > 3.0 * day {
             Some(Cause::Thirst)
-        } else if self.starving > 30.0 * DAY {
+        } else if self.starving > 30.0 * day {
             Some(Cause::Starved)
         } else {
             None

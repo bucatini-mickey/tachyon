@@ -103,7 +103,7 @@ impl Stains {
     }
 
     /// Water and rain wash stains away; old ones fade.
-    pub fn step(&mut self, world: &World, dt: f32) {
+    pub fn step(&mut self, world: &World, dt: f32, day: f32) {
         self.map.retain(|p, s| {
             s.age += dt;
             if let Some(i) = world.index(*p) {
@@ -113,7 +113,7 @@ impl Stains {
                     s.ml -= dt * world.rain * 0.5;
                 }
             }
-            s.ml -= dt * s.ml / (6.0 * 86400.0);
+            s.ml -= dt * s.ml / (6.0 * day);
             s.ml > 3.0
         });
     }
@@ -264,16 +264,16 @@ impl Life {
             self.index = self.creatures.iter().enumerate().map(|(i, c)| (c.thing, i)).collect();
         }
         for i in 0..self.creatures.len() {
-            self.physiology(i, world, things, dt);
+            self.physiology(i, world, things, dt, clock.day_secs as f32);
         }
         let hour = clock.hour() as f32;
         for i in 0..self.creatures.len() {
             ai::act(self, i, world, things, clock.tick, hour);
         }
-        self.stains.step(world, dt);
+        self.stains.step(world, dt, clock.day_secs as f32);
     }
 
-    fn physiology(&mut self, i: usize, world: &mut World, things: &mut Things, dt: f32) {
+    fn physiology(&mut self, i: usize, world: &mut World, things: &mut Things, dt: f32, day: f32) {
         // Borrow the fields separately so a creature and its species can be
         // used at the same time.
         let Life { species, creatures, stains, events, rng, .. } = self;
@@ -327,7 +327,7 @@ impl Life {
             asleep: c.mind.asleep,
         };
         let had_breath = c.needs.breath > 0.0;
-        c.needs.step(&sp.needs, &s, dt);
+        c.needs.step(&sp.needs, &s, dt, day);
         if had_breath && c.needs.breath <= 0.0 {
             events.push(LifeEvent::Drowning(id));
         }
@@ -339,7 +339,7 @@ impl Life {
         let mut spilt = 0.0;
         while left > 0.0 {
             let h = left.min(30.0);
-            spilt += c.body.step(plan, h, heal);
+            spilt += c.body.step(plan, h, heal, day);
             left -= h;
         }
         if spilt > 0.0 && fluid < 8 {
@@ -393,7 +393,7 @@ impl Life {
             events.push(LifeEvent::CameTo(id));
         }
 
-        if let Some(cause) = c.body.fatal(plan).or_else(|| c.needs.fatal(underwater)) {
+        if let Some(cause) = c.body.fatal(plan).or_else(|| c.needs.fatal(underwater, day)) {
             Self::kill(c, sp, things, events, cause);
         }
     }

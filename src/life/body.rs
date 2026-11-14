@@ -704,8 +704,9 @@ impl Body {
 
     /// Advance `dt` seconds: bleeding (returns the ml lost from open wounds,
     /// which ends up on the floor), clotting and healing. `heal` scales the
-    /// healing rate (hunger slows it, sleep speeds it).
-    pub fn step(&mut self, plan: &BodyPlan, dt: f32, heal: f32) -> f32 {
+    /// healing rate (hunger slows it, sleep speeds it); `day` is the day length
+    /// in seconds (healing is quoted per day).
+    pub fn step(&mut self, plan: &BodyPlan, dt: f32, heal: f32, day: f32) -> f32 {
         let mut outside = 0.0;
         let mut lost = 0.0;
         // A trickle this small has clotted (scaled to the body: a rat bleeds drops).
@@ -730,14 +731,14 @@ impl Body {
                 w.age += dt;
                 let destroyed = w.tissue == Tissue::Organ && w.severity >= 1.0;
                 if !s.severed && !destroyed {
-                    w.severity -= heal * heal_rate(w.kind, w.tissue) * dt / 86400.0;
+                    w.severity -= heal * heal_rate(w.kind, w.tissue) * dt / day;
                 }
             }
             s.wounds.retain(|w| w.severity > 0.02 || w.bleed > 0.0);
         }
         self.blood -= lost;
         // Blood comes back over about ten days.
-        self.blood = (self.blood + heal * self.max_blood * dt / (10.0 * 86400.0)).min(self.max_blood);
+        self.blood = (self.blood + heal * self.max_blood * dt / (10.0 * day)).min(self.max_blood);
         outside
     }
 
