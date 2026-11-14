@@ -17,6 +17,14 @@ use tachyon::sim::flames::{self, Lighting};
 use tachyon::view::inspect::describe;
 use tachyon::weather::{describe_wind, wind_from};
 
+/// Whole-world totals for the `--bench` drift readout: liquid in 64ths (all
+/// materials) and the mean cell temperature in C. Read-only.
+fn bench_totals(world: &World) -> (u64, f64) {
+    let liquid: u64 = world.fluid.iter().map(|&f| f as u64).sum();
+    let heat: f64 = world.temp.iter().map(|&t| t as f64).sum::<f64>() / world.temp.len().max(1) as f64;
+    (liquid, heat)
+}
+
 const SPEEDS: [f64; 6] = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0];
 /// Prevailing winds `W` cycles through: speed (cells per tick) and the
 /// direction it blows toward (radians; 0 east, PI/2 south). Gusts and
@@ -849,6 +857,7 @@ fn main() -> io::Result<()> {
             let (fx, fy) = (w / 2 + 18, h / 2 - 10);
             game.scene.world.ignite(Pos::new(fx, fy, G));
         }
+        let (liquid0, heat0) = bench_totals(&game.scene.world);
         let t = Instant::now();
         let mut worst = 0u64;
         let mut awake = 0usize;
@@ -878,6 +887,12 @@ fn main() -> io::Result<()> {
             ms(parts[1]),
             ms(parts[2]),
             ms(parts[3])
+        );
+        let (liquid1, heat1) = bench_totals(&game.scene.world);
+        println!(
+            "  fluid total {liquid0} -> {liquid1} ({:+} of 64ths), mean heat {heat0:.4} -> {heat1:.4} C ({:+.4})",
+            liquid1 as i64 - liquid0 as i64,
+            heat1 - heat0
         );
         if flag("--fire") {
             let world = &game.scene.world;
