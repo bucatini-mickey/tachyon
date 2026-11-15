@@ -42,6 +42,12 @@ export function expand(p: Palette): Palette {
 	return out;
 }
 
+/**
+ * A background that paints nothing: the cell shows whatever lies under the grid. A second Term laid over
+ * the first (an overlay of finer cells for bars and menus over a map of big cells) is cleared to it.
+ */
+export const CLEAR = -1;
+
 export interface Cell {
 	ch: string;
 	fg: number;
@@ -57,6 +63,15 @@ export interface Rect {
 	y: number;
 	w: number;
 	h: number;
+}
+
+/**
+ * The font size, in whole pixels, for a figure or face glyph (a character outside ASCII drawn in two
+ * columns). A little larger than the text, but never taller than its line: a glyph box taller than the
+ * line was cut at the top and bottom on phones, and a fractional size blurs the strokes.
+ */
+export function figurePx(font: number, lineHeight: number): number {
+	return Math.max(1, Math.min(Math.round(font * 1.15), Math.round(lineHeight)));
 }
 
 /** The cell buffer: all the drawing, with no DOM, so it can be tested anywhere. */
@@ -172,12 +187,16 @@ export interface TermOptions {
 	cols?: number;
 	/** Largest font in px (so desktops do not get giant letters). */
 	maxFont?: number;
+	/** Smallest font in px (default 8). The cover is a picture of tiny pixels and lowers it so its title fits a narrow phone. */
+	minFont?: number;
 	/** The grid is at least this many rows tall (default 24); on a wide, short screen the font shrinks to fit them. */
 	rows?: number;
 	/** Called when the app should redraw (size change, entry typed, `draw()`). */
 	onDraw: (t: Term) => void;
 	/** Desktop keys (PageUp, Escape...) not typed into the entry field. */
 	onKey?: (key: string, ev: KeyboardEvent) => void;
+	/** A tap on no hit region goes here instead of ending there (an overlay hands it to the Term under it). */
+	passThrough?: (ev: PointerEvent) => void;
 	/** A mouse moving over the grid: the cell under it (null when it leaves). */
 	onHover?: (cell: { x: number; y: number } | null) => void;
 }
@@ -236,7 +255,9 @@ export class Term extends Grid {
 			+ '.pt-row b{display:inline-block;width:var(--pt-cw);height:100%;text-align:center;font-weight:900;vertical-align:top}'
 			+ '.pt-row i.w{width:calc(2 * var(--pt-cw))}'
 			// (one outside ASCII, a face, fills the square its two columns make)
-			+ '.pt-row i.f{display:inline-flex;align-items:center;justify-content:center;font-size:1.5em;line-height:1}';
+			// (the figure is a whole-pixel size no taller than its line, set by fit() as --pt-fig; the box
+			// never clips, so a mark above or below the letter shows on every font)
+			+ '.pt-row i.f{display:inline-flex;align-items:center;justify-content:center;font-size:var(--pt-fig,1.15em);line-height:1;overflow:visible}';
 		doc.head.appendChild(css);
 		this.pre = doc.createElement('pre');
 		this.pre.style.cssText = 'margin:0;font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"DejaVu Sans Mono","Liberation Mono",monospace;white-space:pre;user-select:none;-webkit-user-select:none;cursor:default;font-variant-ligatures:none;';
@@ -252,21 +273,7 @@ export class Term extends Grid {
 			if (ev.key === 'Enter') this.endEntry(true);
 			else if (ev.key === 'Escape') this.endEntry(false);
 		});
-		this.pre.addEventListener('pointerdown', (ev) => {
-			const b = this.pre.getBoundingClientRect();
-			const x = Math.floor((ev.clientX - b.left) / this.cw), y = Math.floor((ev.clientY - b.top) / this.lh);
-			const fn = this.hitAt(x, y);
-			ev.preventDefault();
-			// A tap on the field being typed in keeps typing; a tap anywhere else ends it (keeping what was
-			// typed) and lets the keyboard go. Left open, every later tap would bring the keyboard back up.
-			if (this.editing) {
-				const r = this.entryAt;
-				if (r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { this.input.focus(); return; }
-				this.endEntry(true);
-			} else if (doc.activeElement === this.input) this.input.blur();
-			this.tapAt = { x, y };
-			if (fn) fn();
-		});
+		this.pre.addEventListener('pointerdown', (ev) => this.press(ev));
 		this.pre.addEventListener('pointermove', (ev) => {
 			if (ev.pointerType !== 'mouse' || !this.opts.onHover) return;
 			const b = this.pre.getBoundingClientRect();
@@ -279,6 +286,25 @@ export class Term extends Grid {
 		});
 		doc.defaultView?.addEventListener('resize', () => this.fit());
 		this.fit();
+	}
+
+	/** A tap at a point on the screen: the cell under it fires its topmost hit region (an overlay passes taps it has no use for here). */
+	press(ev: PointerEvent) {
+		const doc = this.pre.ownerDocument;
+		const b = this.pre.getBoundingClientRect();
+		const x = Math.floor((ev.clientX - b.left) / this.cw), y = Math.floor((ev.clientY - b.top) / this.lh);
+		const fn = this.hitAt(x, y);
+		if (!fn && !this.editing && this.opts.passThrough) { this.opts.passThrough(ev); return; }
+		ev.preventDefault();
+		// A tap on the field being typed in keeps typing; a tap anywhere else ends it (keeping what was
+		// typed) and lets the keyboard go. Left open, every later tap would bring the keyboard back up.
+		if (this.editing) {
+			const r = this.entryAt;
+			if (r && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { this.input.focus(); return; }
+			this.endEntry(true);
+		} else if (doc.activeElement === this.input) this.input.blur();
+		this.tapAt = { x, y };
+		if (fn) fn();
 	}
 
 	/** Open text entry (call from a tap so phones raise the keyboard). `done(null)` means cancelled. */
@@ -311,6 +337,13 @@ export class Term extends Grid {
 		this.fit();
 	}
 
+	/** Set the smallest font (the cover lowers it so its title fits a narrow phone); refits when it changes. */
+	setMinFont(px: number) {
+		if ((this.opts.minFont ?? 8) === px) return;
+		this.opts.minFont = px;
+		this.fit();
+	}
+
 	/** Change the largest font and the fewest rows (a screen that wants bigger cells); refits when they change. */
 	setScale(maxFont: number, rows: number) {
 		if ((this.opts.maxFont ?? 24) === maxFont && (this.opts.rows ?? 24) === rows) return;
@@ -333,7 +366,7 @@ export class Term extends Grid {
 		probe.remove();
 		let font = Math.min(this.opts.maxFont ?? 24, Math.floor(W / (want * ratio)));
 		// On a wide, short screen the height matters too: keep at least `rows` rows.
-		font = Math.max(8, Math.min(font, Math.floor(H / ((this.opts.rows ?? 24) * 1.2))));
+		font = Math.max(this.opts.minFont ?? 8, Math.min(font, Math.floor(H / ((this.opts.rows ?? 24) * 1.2))));
 		this.cw = font * ratio;
 		this.lh = Math.round(font * 1.2);
 		const cols = Math.max(20, Math.floor(W / this.cw));
@@ -343,6 +376,7 @@ export class Term extends Grid {
 		this.rowEls = [];
 		this.pre.style.width = `${cols * this.cw}px`;
 		this.pre.style.setProperty('--pt-cw', `${this.cw}px`);
+		this.pre.style.setProperty('--pt-fig', `${figurePx(font, this.lh)}px`);
 		this.pre.style.height = `${rows * this.lh}px`;
 		this.resize(cols, rows);
 		this.draw();
@@ -390,13 +424,14 @@ export class Term extends Grid {
 				const key = c.fg * 256 + c.bg;
 				if (key !== cur) {
 					if (cur >= 0) out.push('</span>');
-					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${p[c.bg] ?? p[0]}">`);
+					out.push(`<span style="color:${p[c.fg] ?? p[4]};background:${c.bg === CLEAR ? 'transparent' : p[c.bg] ?? p[0]}">`);
 					cur = key;
 				}
 				if (c.wide) { out.push(/[^\x00-\x7e]/.test(c.ch) ? `<i class="w f">${esc(c.ch)}\uFE0E</i>` : `<i class="w">${esc(c.ch)}</i>`); x++; }
 				// Half blocks are painted as two exact halves of colour, so pixel pictures have no seams.
 				else if (c.ch === '▀' || c.ch === '▄') {
-					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], p[c.bg] ?? p[0]] : [p[c.bg] ?? p[0], p[c.fg] ?? p[4]];
+					const bgc = c.bg === CLEAR ? 'transparent' : p[c.bg] ?? p[0];
+					const [hi, lo] = c.ch === '▀' ? [p[c.fg] ?? p[4], bgc] : [bgc, p[c.fg] ?? p[4]];
 					out.push(`<i style="background:linear-gradient(${hi} 50%,${lo} 50%)"> </i>`);
 				}
 				else if (c.bold) out.push(`<b>${esc(c.ch)}</b>`);
