@@ -2,6 +2,8 @@
 
 Status: proposal only. No code has changed. Written against the engine as of 1 Nov 2026 (`src/life/{mind,ai,needs,path,mod,species}.rs`), the skills-and-time proposal (`docs/design/SKILLS_AND_TIME.md`, tach-006, whose `Span`, `Job` and `duration()` this builds on), and the gothic RPG's `plans/vision.md` and `plans/systems.md` (its `pall.rs` already has beliefs with a source and an acquaintance graph; this design generalises them).
 
+Added by Claude, 15 Nov (tach-026): your 14 Nov answers to the open questions are in section 20. Where they differ from sections 1 to 19, section 20 wins.
+
 Your brief (29 Oct): NPCs that navigate the world, react to the environment, have a wealth of dialogue that fits the character, and have ambition and religion. The gothic RPG adds: every NPC has a life, routine, personality, relations, children, drama and needs (Kingdom Come); a pantheon felt more than seen, with a balance that can slip; spy networks with handlers and double crosses; a reputation the player cannot change overnight. Constraints: Rust, crossterm only, hard ASCII, fast; no LLM at runtime.
 
 ## 1. The short version
