@@ -16,7 +16,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Viscosity (oil, lava slower than water) | tested-pass | material.rs `Liquid{viscosity}`, fluid.rs | interactions.rs `lava_spreads_more_slowly_than_water` |
 | Water + lava: obsidian + steam | tested-pass | fluid.rs `react` | physics.rs `water_on_lava_makes_obsidian_and_steam` |
 | Immiscible liquids (oil on water, layering by density) | missing | fluid.rs | liquids "simply do not mix"; no density, oil does not float |
-| Thin film evaporation | impl-untested | fluid.rs trickle, `Material::evaporate` | |
+| Thin film evaporation | tested-pass | fluid.rs trickle, `Material::evaporate` | interactions2.rs `a_thin_film_evaporates_when_warm_but_a_pool_does_not` |
 | Flow field carries floating things | tested-pass | fluid.rs `record` | vessel.rs `current_carries_a_raft_downstream` |
 | Raft floats, paddled raft conserves water | tested-pass | grid/vessel.rs | vessel.rs |
 | Springs and drains (rivers, sea edge) | tested-pass (indirect) | sim/mod.rs `Source` | worldbuild.rs river/sea; sea.rs; no direct unit test |
@@ -90,7 +90,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | FOV symmetric | tested-pass | grid sight | physics.rs `fov_is_symmetric` |
 | Walls hide what is behind them | tested-pass (sea-scale) | sight | sight.rs `an_island_hides_what_is_behind_it` |
 | Unlit or submerged flame gives no light | tested-pass | light.rs + flames.rs | interactions.rs `a_submerged_flame_goes_dark_and_gives_no_light`, dynamic light test (unlit) |
-| Flicker | impl-untested | light.rs `flicker` | |
+| Flicker | tested-pass | light.rs `flicker` | interactions2.rs `fire_light_flickers_in_steps_within_bounds` |
 | Water dims light with depth | missing | | |
 | Smoke dims light | missing | | smoke blocks sight, not light |
 
@@ -98,8 +98,8 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 
 | Interaction | Status | Lives in | Test / note |
 |---|---|---|---|
-| Wind gusts and veers, deterministic | impl-untested | weather.rs | |
-| Rain adds water to floors and puddles | impl-untested | sim/mod.rs `rain` | |
+| Wind gusts and veers, deterministic | tested-pass | weather.rs | interactions2.rs `wind_gusts_and_veers_but_is_deterministic` |
+| Rain adds water to floors and puddles | tested-pass | sim/mod.rs `rain` | interactions2.rs `rain_adds_water_to_open_floors` (puddle merging not tested) |
 | No rain or wind under a roof | tested-pass | sim/mod.rs, open_sky | elements.rs `no_rain_or_wind_under_a_roof` |
 | Rain washes blood | tested-pass | life | life.rs `bleeding_stains_the_floor_and_rain_washes_it` |
 | Rain slants with wind | missing | sim/mod.rs `rain` | weather.rs doc says it slants; drops fall straight down |
@@ -115,8 +115,8 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Interaction | Status | Lives in | Test / note |
 |---|---|---|---|
 | Creatures drown, burn, fall | tested-pass | life/, movement.rs | life.rs `creatures_drown_burn_and_fall` |
-| Swimming vs walking by liquid depth | impl-untested | movement.rs `SWIM_DEPTH` | indirect via raft/life tests |
-| Pathing avoids hazards (fire, deep water, lava) | impl-untested | life/path.rs `hazard` | |
+| Swimming vs walking by liquid depth | tested-pass | movement.rs `SWIM_DEPTH` | interactions2.rs `swimming_starts_at_half_depth_and_costs_more_to_path_through` |
+| Pathing avoids hazards (fire, deep water, lava) | tested-pass | life/path.rs `hazard` | interactions2.rs `paths_go_round_fire_and_scalding_air_and_fail_when_walled_in` (fire and heat; deep water is only costed, not avoided) |
 | Wounds: bruise, bleed, sever, fatal | tested-pass | life/body.rs | life.rs |
 | Blood stains floor | tested-pass | life | life.rs |
 | Hunger and thirst: find food and water | tested-pass | life/needs.rs | life.rs |
@@ -146,7 +146,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Blast in a sealed room: pressure, gas pushed out | missing | | |
 | Wind deflects arrows and bolts | missing | projectile.rs | gale does not move shots |
 | Fire arrow lights thatch; rain douses it in flight | missing | | |
-| Projectile through glass breaks it | impl-untested | material.rs `strength`, `transparent` | |
+| Projectile through glass breaks it | tested-pass | material.rs `strength`, `transparent` | interactions2.rs `a_blast_breaks_glass_that_granite_survives` (a blast; a bolt in flight is untested) |
 
 ## World generation
 
@@ -155,9 +155,9 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Deterministic from atlas and seed | tested-pass | make/worldgen.rs | worldbuild.rs `generation_is_deterministic_and_regions_line_up` |
 | Sea below sea level, held by springs and drains | tested-pass | worldgen.rs | worldbuild.rs `generated_island_has_sea_land_river_and_features` |
 | Rivers flow downhill from a spring | tested-pass | worldgen.rs | same test |
-| Biome surface (grass, sand, snow); steep slopes bare rock | impl-untested | worldgen.rs | only presence checked |
-| Trees and marsh puddles per biome | impl-untested | worldgen.rs | |
-| Ramps join every step | impl-untested | worldgen.rs | |
+| Biome surface (grass, sand, snow); steep slopes bare rock | tested-pass | worldgen.rs | interactions2.rs `each_biome_gets_its_own_surface_and_steep_ground_shows_rock` |
+| Trees and marsh puddles per biome | tested-pass | worldgen.rs | interactions2.rs `forest_gets_trees_and_marsh_gets_shallow_puddles_and_nothing_else_does` |
+| Ramps join every step | tested-pass | worldgen.rs | interactions2.rs `ramps_join_every_one_level_step_on_dry_land` |
 | Blueprints stamp structures | tested-pass | make/blueprint.rs | worldbuild.rs `blueprint_round_trip_and_stamp` |
 | Generated terrain is stable under physics (no spurious flooding, collapse, fire) | missing | | no settle-and-compare test |
 | Caves, ore veins, aquifers, lava layer | missing | worldgen.rs | |
@@ -166,6 +166,7 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 
 ## Notes for later tasks
 
-- No row is tested-fail (tach-002 added tests/interactions.rs, 10 rows now pass). Biggest untested clusters: light (all of it), gas decay and rise, phase changes other than water-lava, weather generators, worldgen detail.
+- No row is tested-fail (tach-002 added tests/interactions.rs on 31 Oct and tests/interactions2.rs on 15 Nov, 20 rows in all). Biggest untested clusters: light (all of it), gas decay and rise, phase changes other than water-lava, weather generators, worldgen detail.
 - Cheapest high-value tests to write first: ice melt and water freeze, gas conservation, smoke rises and is sealed by a ceiling, blast ignites wood, burning floor under rain, sky light through a doorway.
+- Still impl-untested: liquid pouring through a blast hole. Next to test: deep-earth heat sink, faster smoke decay under open sky, burning cells under rain, blast smoke.
 - Biggest missing behaviours: immiscible liquids (oil), flammable gas, plant growth, condensation, lightning, porous ground.
