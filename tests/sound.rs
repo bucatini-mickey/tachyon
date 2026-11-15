@@ -112,3 +112,54 @@ fn a_fire_starting_is_heard_and_burning_lifts_the_floor() {
     let burning = s.noise.floor(&s.world, at);
     assert!(burning >= quiet + 10.0, "a burning wall only lifted the floor to {burning} dB");
 }
+
+/// A stone room (x 4..=12, y 2..=8) with a door in its east wall at (12, 5)
+/// opening on a walled corridor that runs east along y = 5.
+fn room_and_corridor() -> (Scene, ThingId) {
+    let mut s = field(40);
+    let stone = s.world.mats.id("stone block");
+    for y in 2..=8 {
+        for x in 4..=12 {
+            if x == 4 || x == 12 || y == 2 || y == 8 {
+                s.world.set_tile(Pos::new(x, y, 1), Tile::Wall, stone);
+            }
+        }
+    }
+    for x in 13..=35 {
+        s.world.set_tile(Pos::new(x, 4, 1), Tile::Wall, stone);
+        s.world.set_tile(Pos::new(x, 6, 1), Tile::Wall, stone);
+    }
+    let gap = Pos::new(12, 5, 1);
+    s.world.set_tile(gap, Tile::Open, AIR);
+    let kind = s.things.add_kind(ThingKind::new("door", '+', Rgb::WHITE, Layer::Furniture).blocking().door('\''));
+    let door = s.things.spawn(kind, gap);
+    (s, door)
+}
+
+#[test]
+fn a_scream_in_a_stone_room_is_heard_down_the_corridor_from_the_open_door() {
+    let (mut s, door) = room_and_corridor();
+    let (scream, at) = (Pos::new(8, 3, 1), Pos::new(30, 5, 1));
+    s.sounds = vec![Sound::new(scream, level::SCREAM, SoundKind::Scream)];
+
+    s.things.get_mut(door).unwrap().open = true;
+    let heard = s.hear(at, HUMAN_HEARING);
+    let h = heard.first().expect("a scream was not heard down the corridor through an open door");
+    assert_eq!(h.from, (12 - 30, 0, 0), "it should seem to come from the door");
+    assert_eq!(s.sound_searches(), 1);
+
+    s.things.get_mut(door).unwrap().open = false;
+    assert!(s.hear(at, HUMAN_HEARING).is_empty(), "a scream was heard at the end of the corridor through a shut door");
+}
+
+#[test]
+fn a_sound_with_nothing_in_the_way_never_runs_the_search() {
+    let mut s = field(24);
+    s.sounds = vec![Sound::new(Pos::new(3, 5, 1), level::SHOUT, SoundKind::Speech(Voice::Shout))];
+    assert!(!s.hear(Pos::new(15, 5, 1), HUMAN_HEARING).is_empty());
+    assert_eq!(s.sound_searches(), 0);
+    // With a wall across the line, the search does run.
+    wall_at(&mut s, 10, "wood");
+    s.hear(Pos::new(15, 5, 1), HUMAN_HEARING);
+    assert_eq!(s.sound_searches(), 1);
+}

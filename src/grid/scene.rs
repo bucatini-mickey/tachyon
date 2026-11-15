@@ -7,7 +7,9 @@ use crate::sim::Sim;
 use crate::geom::Pos;
 use crate::life::{Life, LifeEvent};
 use crate::projectile::{BlastReport, Flight, Projectile};
-use crate::sound::{self, Heard, Noise, Sound, SoundKind};
+use std::cell::RefCell;
+
+use crate::sound::{self, Heard, Noise, Router, Sound, SoundKind};
 use crate::things::{KindId, ThingId, Things};
 use crate::vessel::Vessel;
 use crate::weather::Weather;
@@ -36,6 +38,9 @@ pub struct Scene {
     pub sounds: Vec<Sound>,
     /// The background noise, recomputed each tick (see [`Scene::hear`]).
     pub noise: Noise,
+    // `RefCell` lets `hear(&self)` borrow this scratch memory mutably at run
+    // time (checked then, not by the compiler), so listening needs no `&mut`.
+    router: RefCell<Router>,
     /// How many of `sounds` were there when the last tick ended.
     old_sounds: usize,
     /// `World::fires_started` when we last looked, to notice new fires.
@@ -59,6 +64,7 @@ impl Scene {
             events: Vec::new(),
             sounds: Vec::new(),
             noise: Noise::new(),
+            router: RefCell::new(Router::new()),
             old_sounds: 0,
             fires_seen,
         }
@@ -126,7 +132,12 @@ impl Scene {
     /// (`sound::HUMAN_HEARING`, `sound::DOG_HEARING`).
     pub fn hear(&self, at: Pos, hearing_db: f32) -> Vec<Heard> {
         let floor = self.noise.floor(&self.world, at);
-        sound::hear(&self.world, &self.things, &self.sounds, at, floor, hearing_db)
+        sound::hear(&self.world, &self.things, &mut self.router.borrow_mut(), &self.sounds, at, floor, hearing_db)
+    }
+
+    /// How many round-the-corner searches `hear` has run so far.
+    pub fn sound_searches(&self) -> u64 {
+        self.router.borrow().searches
     }
 
     /// The vessel whose deck is at `p`, if any.

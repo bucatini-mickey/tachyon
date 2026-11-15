@@ -11,8 +11,14 @@
 //! straight line between them ([`path_loss`]). It is heard if what is left
 //! stands far enough above the background noise where the listener is.
 //!
-//! Not yet (second half of section 5): the round-corner search through open
-//! doors, floor slabs between levels, and wiring footsteps and life events.
+//! When a wall is in the way, [`Router`] also searches round the corner
+//! through open cells and doors, and the louder route wins.
+//!
+//! Not yet (second half of section 5): floor slabs between levels, and wiring
+//! footsteps and life events.
+
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 use crate::geom::Pos;
 use crate::things::{ThingId, Things};
@@ -109,9 +115,10 @@ pub struct Heard {
     /// How far it stands above the background noise where the listener is, dB
     /// (it can be below zero: a keen ear picks a sound out of the noise).
     pub db_over: f32,
-    /// The way it seems to come from, as an offset from the listener. For now
-    /// that is the source itself; the round-corner search will make it the
-    /// first opening on the path (a shout round a corner comes from the door).
+    /// The way it seems to come from, as an offset from the listener: the
+    /// source itself on a clear line, or, for a sound that came round a
+    /// corner, the open door nearest the listener on its path (else the
+    /// nearest turn). A shout round a corner seems to come from the door.
     pub from: (i32, i32, i32),
 }
 
@@ -171,21 +178,200 @@ fn dist(a: Pos, b: Pos) -> f32 {
 
 /// What a listener at `at` hears of `sounds`, given the background `floor`
 /// there and how keen its hearing is (`hearing_db`, see [`HUMAN_HEARING`]).
-pub fn hear(world: &World, things: &Things, sounds: &[Sound], at: Pos, floor: f32, hearing_db: f32) -> Vec<Heard> {
+/// `router` does the round-the-corner search when a wall is in the way.
+pub fn hear(world: &World, things: &Things, router: &mut Router, sounds: &[Sound], at: Pos, floor: f32, hearing_db: f32) -> Vec<Heard> {
     let need = floor + hearing_db;
     let mut out = Vec::new();
     for (n, s) in sounds.iter().enumerate() {
-        let open_air = s.db - spread_loss(dist(s.pos, at));
+        let r = dist(s.pos, at);
+        let open_air = s.db - spread_loss(r);
         // Too faint even with nothing in the way: skip the line walk.
         if open_air < need {
             continue;
         }
-        let got = open_air - wall_loss(world, things, s.pos, at);
+        let walls = wall_loss(world, things, s.pos, at);
+        let mut got = open_air - walls;
+        let mut from = (s.pos.x - at.x, s.pos.y - at.y, s.pos.z - at.z);
+        // Only a blocked line is worth a search; a clear one never runs it.
+        if walls > 0.0 {
+            if let Some(route) = router.route(world, things, s.pos, at) {
+                // A detour is never louder than open air over the straight distance.
+                let detour = s.db - (route.cost as f32).max(spread_loss(r));
+                if detour > got {
+                    got = detour;
+                    from = (route.via.x - at.x, route.via.y - at.y, route.via.z - at.z);
+                }
+            }
+        }
         if got >= need {
-            out.push(Heard { sound: n, db_over: got - floor, from: (s.pos.x - at.x, s.pos.y - at.y, s.pos.z - at.z) });
+            out.push(Heard { sound: n, db_over: got - floor, from });
         }
     }
     out
+}
+
+/// Most cells one round-the-corner search may settle.
+pub const ROUTE_BUDGET: usize = 2048;
+/// How far (cells, each way) a sound may be carried round corners.
+pub const ROUTE_RADIUS: i32 = 32;
+/// dB a sound loses per cell of the detour, and per change of direction.
+pub const ROUTE_CELL: u32 = 1;
+pub const ROUTE_TURN: u32 = 6;
+
+const SIDE: usize = (2 * ROUTE_RADIUS + 1) as usize;
+/// States per cell: four headings, plus "not moving yet" for the start.
+const HEADINGS: usize = 5;
+const STATES: usize = SIDE * SIDE * HEADINGS;
+const STEPS: [(i32, i32); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+
+/// What the search found: the loss along the way and the place the sound
+/// seems to come from.
+#[derive(Clone, Copy, Debug)]
+pub struct Route {
+    pub cost: u32,
+    pub via: Pos,
+}
+
+/// The round-the-corner search (Dijkstra) and its scratch memory. Keep one and
+/// reuse it: nothing is allocated per search.
+#[derive(Debug)]
+pub struct Router {
+    /// How many searches have run (a sound with a clear line never runs one).
+    pub searches: u64,
+    heap: BinaryHeap<Reverse<(u32, u32)>>,
+    dist: Vec<u32>,
+    prev: Vec<u32>,
+    // `stamp[i] == gen` means `dist[i]` belongs to the current search, so
+    // nothing needs clearing between searches: bumping `gen` forgets it all.
+    stamp: Vec<u32>,
+    settled: Vec<u32>,
+    gen: u32,
+}
+
+impl Default for Router {
+    fn default() -> Router {
+        Router {
+            searches: 0,
+            heap: BinaryHeap::new(),
+            dist: vec![0; STATES],
+            prev: vec![0; STATES],
+            stamp: vec![0; STATES],
+            settled: vec![0; SIDE * SIDE],
+            gen: 0,
+        }
+    }
+}
+
+/// Can sound pass this cell? `None` for a wall or a closed door; otherwise
+/// whether an open door stands here.
+fn open_cell(world: &World, things: &Things, p: Pos) -> Option<bool> {
+    let i = world.index(p)?;
+    if world.tile[i].is_wall() {
+        return None;
+    }
+    let mut open_door = false;
+    for (_, t) in things.at(p) {
+        if things.kind(t.kind).door {
+            if !t.open {
+                return None;
+            }
+            open_door = true;
+        }
+    }
+    Some(open_door)
+}
+
+impl Router {
+    pub fn new() -> Router {
+        Router::default()
+    }
+
+    /// The least-loss way for sound to get from `from` to `to` on one level,
+    /// through open cells and open doors (4-neighbour steps, 1 dB per cell,
+    /// 6 dB per change of direction), settling at most [`ROUTE_BUDGET`] cells
+    /// within [`ROUTE_RADIUS`] of `from`. `None` if there is no such way.
+    pub fn route(&mut self, world: &World, things: &Things, from: Pos, to: Pos) -> Option<Route> {
+        if from.z != to.z || (to.x - from.x).abs() > ROUTE_RADIUS || (to.y - from.y).abs() > ROUTE_RADIUS {
+            return None;
+        }
+        self.searches += 1;
+        self.gen = self.gen.wrapping_add(1);
+        if self.gen == 0 {
+            self.stamp.fill(0);
+            self.settled.fill(0);
+            self.gen = 1;
+        }
+        let gen = self.gen;
+        // Cells of the search window are numbered from its top-left corner.
+        // (A closure is a small inline function that can use `from` above.)
+        let cell_of = |p: Pos| ((p.y - from.y + ROUTE_RADIUS) as usize) * SIDE + (p.x - from.x + ROUTE_RADIUS) as usize;
+        let pos_of = |c: usize| Pos::new(from.x + (c % SIDE) as i32 - ROUTE_RADIUS, from.y + (c / SIDE) as i32 - ROUTE_RADIUS, from.z);
+        let goal = cell_of(to);
+
+        self.heap.clear();
+        let start = cell_of(from) * HEADINGS + 4;
+        self.dist[start] = 0;
+        self.prev[start] = u32::MAX;
+        self.stamp[start] = gen;
+        // `Reverse` turns Rust's biggest-first heap into a smallest-first one.
+        self.heap.push(Reverse((0, start as u32)));
+        let mut settled = 0;
+        let mut found = None;
+        while let Some(Reverse((d, st))) = self.heap.pop() {
+            let st = st as usize;
+            if d > self.dist[st] {
+                continue; // stale: a cheaper way here was found after this was queued
+            }
+            let (cell, heading) = (st / HEADINGS, st % HEADINGS);
+            if cell == goal {
+                found = Some(st);
+                break;
+            }
+            if self.settled[cell] != gen {
+                self.settled[cell] = gen;
+                settled += 1;
+                if settled > ROUTE_BUDGET {
+                    break;
+                }
+            }
+            let p = pos_of(cell);
+            for (h, (dx, dy)) in STEPS.iter().enumerate() {
+                let q = Pos::new(p.x + dx, p.y + dy, p.z);
+                if (q.x - from.x).abs() > ROUTE_RADIUS || (q.y - from.y).abs() > ROUTE_RADIUS {
+                    continue;
+                }
+                if open_cell(world, things, q).is_none() {
+                    continue;
+                }
+                let turn = if heading < 4 && heading != h { ROUTE_TURN } else { 0 };
+                let nd = d + ROUTE_CELL + turn;
+                let ns = cell_of(q) * HEADINGS + h;
+                if self.stamp[ns] != gen || nd < self.dist[ns] {
+                    self.stamp[ns] = gen;
+                    self.dist[ns] = nd;
+                    self.prev[ns] = st as u32;
+                    self.heap.push(Reverse((nd, ns as u32)));
+                }
+            }
+        }
+        let end = found?;
+        // Walk back from the listener: the first open door met (or, failing
+        // that, the first corner) is where the sound seems to come from.
+        let (mut door, mut corner) = (None, None);
+        let mut st = end;
+        while self.prev[st] != u32::MAX {
+            let p = self.prev[st] as usize;
+            let here = pos_of(st / HEADINGS);
+            if door.is_none() && open_cell(world, things, here) == Some(true) {
+                door = Some(here);
+            }
+            if corner.is_none() && p % HEADINGS < 4 && p % HEADINGS != st % HEADINGS {
+                corner = Some(pos_of(p / HEADINGS));
+            }
+            st = p;
+        }
+        Some(Route { cost: self.dist[end], via: door.or(corner).unwrap_or(from) })
+    }
 }
 
 /// The background level with nothing going on: a quiet night indoors.
