@@ -18,7 +18,7 @@
 //!            weather projectile sound             wind and rain; things in flight and explosions; sound
 //!  life/     body needs mind ai path species      creatures
 //!  sea/      field craft ballistics sight         open water as fields; ships posed on it; shot; long sight
-//!  make/     atlas blueprint worldgen lang library   authored world maps and structures; generated names; Tokamak files
+//!  make/     atlas blueprint hydro worldgen lang library   authored world maps and structures; generated names; Tokamak files
 //!  draw/     frame view ui display                cell pictures of the world and its screens; how they reach the screen
 //!  backend/  term input app                       the terminal, input events and the main loop
 //! ```
@@ -44,7 +44,7 @@ pub use backend::{app, input, term};
 pub use base::{color, geom, noise, rng};
 pub use draw::{display, frame, palette, ui, view};
 pub use grid::{clock, material, movement, scene, things, tile, vessel, world};
-pub use make::{atlas, blueprint, lang, library, worldgen};
+pub use make::{atlas, blueprint, hydro, lang, library, worldgen};
 pub use sea::{ballistics, craft, sight};
 pub use sim::{projectile, sound, weather};
 

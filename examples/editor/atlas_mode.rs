@@ -4,6 +4,7 @@ use crate::palette::{self, BIOMES, FEATURES, ROCKS};
 use crate::{Ask, Editor, Mode, Panel, DIM, TITLE, TXT};
 use tachyon::atlas::{Atlas, Feature, River, GROUND, REGION};
 use tachyon::frame::Cell;
+use tachyon::hydro::{erode, ErodeSettings};
 use tachyon::noise::fbm2;
 use tachyon::prelude::*;
 
@@ -177,6 +178,12 @@ impl Editor {
                 a.biome[i] = ocean;
             }
         };
+        // Repainting heights makes an eroded relief stale: drop it (undo brings it back).
+        if matches!(self.a.tool, Tool::Raise | Tool::Smooth) || (self.a.tool == Tool::Height && primary) {
+            if self.atlas.relief.take().is_some() {
+                self.say("Heights repainted, so the eroded 8 m relief was dropped (u brings it back).");
+            }
+        }
         match self.a.tool {
             Tool::Raise => {
                 let s = if primary { self.a.step } else { -self.a.step } as f32;
@@ -355,6 +362,7 @@ impl Editor {
                 self.atlas = rough_island(self.atlas.w, self.atlas.h, seed);
                 self.say("A new rough island. Undo (u) brings the old map back.");
             }
+            Key::Char('E') => self.write_eroded(),
             Key::Char('?') => self.a.help = !self.a.help,
             Key::Char('q') => {
                 if self.dirty {
@@ -366,6 +374,30 @@ impl Editor {
             _ => {}
         }
         Flow::Continue
+    }
+
+    /// Erode the map as it is now and write it beside the open file as
+    /// `<name>-eroded.atlas`. The open file and the map on screen are not changed.
+    pub fn write_eroded(&mut self) {
+        let path = std::path::Path::new(&self.path);
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("world");
+        let out = path.with_file_name(format!("{stem}-eroded.atlas"));
+        if out == path {
+            self.say("Not eroding: the output would replace the open file.");
+            return;
+        }
+        let set = ErodeSettings::default();
+        let e = erode(&self.atlas, &set);
+        let land: Vec<usize> = (0..e.before.height.len()).filter(|&i| e.before.height[i] > 0.0).collect();
+        let cut = |i: usize| (e.before.height[i] - e.after.height[i]) as f64;
+        let mean = land.iter().map(|&i| cut(i)).sum::<f64>() / land.len().max(1) as f64;
+        let deepest = land.iter().map(|&i| cut(i)).fold(0.0, f64::max);
+        let kyr = set.steps as f64 * set.dt / 1000.0;
+        let name = out.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        match tachyon::library::write_atomic(&out, &e.atlas.to_text()) {
+            Ok(()) => self.say(format!("Wrote {name}: {kyr:.0} kyr of erosion, land {mean:.1} m lower on average, deepest cut {deepest:.1} m.")),
+            Err(err) => self.say(format!("Couldn't write {name}: {err}")),
+        }
     }
 
     fn atlas_undo(&mut self) {
@@ -539,6 +571,9 @@ impl Editor {
         p.line(f, "TACHYON  world editor", TITLE);
         p.line(f, &format!("{}{}", self.path, if self.dirty { "  (unsaved)" } else { "" }), TXT);
         p.line(f, &format!("{}  {}x{} cells of {} m", a.name, a.w, a.h, REGION), DIM);
+        if let Some(r) = &a.relief {
+            p.line(f, &format!("eroded relief: {} m cells", r.cell_m()), DIM);
+        }
         let view = match self.a.view {
             View::Terrain => "terrain",
             View::Height => "height",
@@ -606,6 +641,7 @@ impl Editor {
                 ", .             choose rock/biome/kind",
                 "Tab  view       Enter  walk in (1 m)",
                 "u  undo   S  save   I  rough island",
+                "E  erode to <name>-eroded.atlas",
                 "N  blank sea    ?  help   q  quit",
             ]
             .iter()

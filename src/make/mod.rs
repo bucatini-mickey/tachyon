@@ -4,6 +4,7 @@
 
 pub mod atlas;
 pub mod blueprint;
+pub mod hydro;
 pub mod lang;
 pub mod library;
 pub mod worldgen;
