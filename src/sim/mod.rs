@@ -58,6 +58,7 @@ pub mod gas;
 pub mod heat;
 pub mod light;
 pub mod projectile;
+pub mod sound;
 pub mod weather;
 
 use crate::geom::Pos;

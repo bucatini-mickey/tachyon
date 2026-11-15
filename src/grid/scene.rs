@@ -7,6 +7,7 @@ use crate::sim::Sim;
 use crate::geom::Pos;
 use crate::life::{Life, LifeEvent};
 use crate::projectile::{BlastReport, Flight, Projectile};
+use crate::sound::{self, Heard, Noise, Sound, SoundKind};
 use crate::things::{KindId, ThingId, Things};
 use crate::vessel::Vessel;
 use crate::weather::Weather;
@@ -29,6 +30,16 @@ pub struct Scene {
     /// What happened this tick that a game may want to report; the game
     /// drains it.
     pub events: Vec<SceneEvent>,
+    /// Sounds made during the last tick, and any the game has pushed since
+    /// (the player shouting). Each lasts until the start of the tick after
+    /// the one it was made in, so everything gets one chance to be heard.
+    pub sounds: Vec<Sound>,
+    /// The background noise, recomputed each tick (see [`Scene::hear`]).
+    pub noise: Noise,
+    /// How many of `sounds` were there when the last tick ended.
+    old_sounds: usize,
+    /// `World::fires_started` when we last looked, to notice new fires.
+    fires_seen: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -39,20 +50,37 @@ pub enum SceneEvent {
 
 impl Scene {
     pub fn new(world: World, things: Things, clock: Clock, seed: u64) -> Scene {
+        let fires_seen = world.fires_started; // read before `world` moves into the struct
         Scene { world, things, clock, sim: Sim::new(seed), vessels: Vec::new(), life: Life::new(seed),
             weather: Weather::new(seed as u32 ^ 0x3EA7),
             projectiles: Vec::new(),
             effects: Vec::new(),
             flash: None,
             events: Vec::new(),
+            sounds: Vec::new(),
+            noise: Noise::new(),
+            old_sounds: 0,
+            fires_seen,
         }
     }
 
     /// Advance the physics one tick.
     pub fn tick(&mut self) {
+        // `drain(..n)` removes the first n items (the sounds already heard
+        // once); dropping its result right away is enough.
+        self.sounds.drain(..self.old_sounds.min(self.sounds.len()));
         self.world.ambient = self.clock.ambient_temp();
         self.weather.apply(&mut self.world, &self.clock);
         self.sim.step(&mut self.world, self.clock.tick);
+        // A new fire this tick, or one the game lit since the last tick.
+        if self.world.fires_started > self.fires_seen {
+            self.fires_seen = self.world.fires_started;
+            if let Some(at) = self.world.last_fire_start {
+                self.sounds.push(Sound::new(at, sound::level::FIRE, SoundKind::Fire));
+            }
+        }
+        let (wx, wy) = self.world.wind;
+        self.noise.update(&self.world, wx.hypot(wy) / self.clock.secs_per_tick as f32);
         crate::sim::flames::step(&self.world, &mut self.things, &mut self.sim.rng, self.clock.secs_per_tick as f32);
         for v in &mut self.vessels {
             v.step(&mut self.world, &mut self.things);
@@ -72,6 +100,7 @@ impl Scene {
                         let id = self.things.spawn(k, at);
                         self.effects.push((id, 3));
                     }
+                    self.sounds.push(Sound { source: owner, ..Sound::new(at, sound::blast_db(blast.power), SoundKind::Blast) });
                     self.events.push(SceneEvent::Exploded(at, report));
                 }
                 Flight::Fizzled(at) => self.events.push(SceneEvent::Fizzled(at)),
@@ -89,6 +118,15 @@ impl Scene {
         });
         self.life.step(&mut self.world, &mut self.things, &self.clock);
         self.clock.advance();
+        self.old_sounds = self.sounds.len();
+    }
+
+    /// What a listener at `at` hears of `self.sounds`. `hearing_db` is how far
+    /// below the background it can still pick a sound out
+    /// (`sound::HUMAN_HEARING`, `sound::DOG_HEARING`).
+    pub fn hear(&self, at: Pos, hearing_db: f32) -> Vec<Heard> {
+        let floor = self.noise.floor(&self.world, at);
+        sound::hear(&self.world, &self.things, &self.sounds, at, floor, hearing_db)
     }
 
     /// The vessel whose deck is at `p`, if any.

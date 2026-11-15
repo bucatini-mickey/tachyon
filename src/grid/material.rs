@@ -86,6 +86,8 @@ pub struct Material {
     pub strength: f32,
     /// Chance per tick that a thin film (1-2 units) of this liquid evaporates.
     pub evaporate: f32,
+    /// Decibels a sound loses passing through a 1 m wall of it (see `sound`).
+    pub sound_loss: f32,
 }
 
 impl Default for Material {
@@ -113,6 +115,7 @@ impl Default for Material {
             glow: None,
             strength: 50.0,
             evaporate: 0.0,
+            sound_loss: 40.0,
         }
     }
 }
@@ -162,6 +165,7 @@ impl Materials {
             floor_glyphs: vec![' '],
             conduct: 0.06,
             heat_cap: 1.0,
+            sound_loss: 0.0,
             ..Default::default()
         });
         m
@@ -204,6 +208,9 @@ impl Materials {
     /// wood, leaves, stone block, slate, glass, ash, ice, obsidian, water,
     /// lava, steam, smoke, mist; rocks sandstone, limestone, basalt, marble,
     /// chalk; ground cover snow, mud, clay, gravel.
+    ///
+    /// Sound through a 1 m wall: air 0, leaves 3, wood 22, glass 25, ice 30,
+    /// stone and rock 50; soil and other ground (the default) 40.
     pub fn standard() -> Materials {
         let mut m = Materials::new();
         let solid = |name: &str, fg: Rgb, bg: Rgb, wall: char, floors: &[char]| Material {
@@ -241,6 +248,7 @@ impl Materials {
             conduct: 0.03,
             heat_cap: 2.2,
             strength: 400.0,
+            sound_loss: 50.0,
             ..solid("granite", Rgb(118, 116, 124), Rgb(46, 44, 52), '▓', &['.', '·', '.', ','])
         });
         m.add(Material {
@@ -282,6 +290,7 @@ impl Materials {
             conduct: 0.02,
             heat_cap: 1.6,
             strength: 80.0,
+            sound_loss: 22.0,
             ..solid("wood", Rgb(168, 118, 66), Rgb(62, 40, 22), 'O', &['+'])
         });
         m.add(Material {
@@ -293,6 +302,7 @@ impl Materials {
             conduct: 0.03,
             heat_cap: 1.2,
             strength: 5.0,
+            sound_loss: 3.0,
             ..solid("leaves", Rgb(60, 134, 48), Rgb(18, 44, 16), '♣', &['♣'])
         });
         m.add(Material {
@@ -300,18 +310,21 @@ impl Materials {
             conduct: 0.03,
             heat_cap: 2.2,
             strength: 250.0,
+            sound_loss: 50.0,
             ..solid("stone block", Rgb(178, 176, 168), Rgb(62, 60, 58), '#', &['+'])
         });
         m.add(Material {
             conduct: 0.03,
             heat_cap: 2.0,
             strength: 200.0,
+            sound_loss: 50.0,
             ..solid("slate", Rgb(96, 104, 124), Rgb(36, 40, 50), '▓', &['≡'])
         });
         m.add(Material {
             transparent: true,
             conduct: 0.04,
             strength: 15.0,
+            sound_loss: 25.0,
             ..solid("glass", Rgb(160, 214, 232), Rgb(30, 56, 66), '░', &['.'])
         });
         // More rock, for world building. Strength is for blasts.
@@ -322,7 +335,7 @@ impl Materials {
             ("marble", Rgb(232, 228, 222), Rgb(110, 106, 104), 260.0),
             ("chalk", Rgb(236, 234, 220), Rgb(130, 128, 116), 60.0),
         ] {
-            m.add(Material { conduct: 0.03, heat_cap: 2.1, strength, ..solid(name, fg, bg, '▓', &['.', '·', ',', '.']) });
+            m.add(Material { conduct: 0.03, heat_cap: 2.1, strength, sound_loss: 50.0, ..solid(name, fg, bg, '▓', &['.', '·', ',', '.']) });
         }
         // Ground cover.
         m.add(Material { conduct: 0.02, heat_cap: 2.0, strength: 10.0, ..solid("snow", Rgb(236, 240, 250), Rgb(150, 160, 180), '▒', &['.', '·', '\'', '.']) });
@@ -334,12 +347,14 @@ impl Materials {
             conduct: 0.06,
             heat_cap: 2.0,
             strength: 40.0,
+            sound_loss: 30.0,
             ..solid("ice", Rgb(200, 236, 255), Rgb(110, 160, 200), '▓', &['·'])
         });
         let obsidian = m.add(Material {
             conduct: 0.03,
             heat_cap: 2.0,
             strength: 300.0,
+            sound_loss: 50.0,
             ..solid("obsidian", Rgb(80, 64, 96), Rgb(22, 16, 28), '▓', &['.', '·'])
         });
         let water = m.add(Material {

@@ -148,6 +148,21 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Fire arrow lights thatch; rain douses it in flight | missing | | |
 | Projectile through glass breaks it | tested-pass | material.rs `strength`, `transparent` | interactions2.rs `a_blast_breaks_glass_that_granite_survives` (a blast; a bolt in flight is untested) |
 
+## Sound
+
+| Interaction | Status | Lives in | Test / note |
+|---|---|---|---|
+| Walls soak up sound by material (wood 22 dB, stone 50, capped at 60 per line) | tested-pass | sound.rs `wall_loss`, material.rs `sound_loss` | sound.rs `a_shout_is_heard_through_one_wooden_wall_but_not_four_stone_ones` |
+| A closed door takes 18 dB off, an open one nothing | tested-pass | sound.rs `wall_loss`, things.rs `sound_loss` | sound.rs `closing_a_door_between_two_rooms_drops_the_level_by_at_least_15_db` |
+| Rain and wind lift the noise floor outdoors, muffled indoors | tested-pass (rain) | sound.rs `Noise` | sound.rs `rain_drowns_a_whisper_outdoors_but_not_indoors`; wind untested |
+| Burning cells lift the floor; a new fire makes a sound | tested-pass | sound.rs `Noise`, scene.rs `tick` | sound.rs `a_fire_starting_is_heard_and_burning_lifts_the_floor` |
+| Flowing water (`flow_x/flow_y`) lifts the floor | impl-untested | sound.rs `Noise` | |
+| A blast makes a sound of `100 + 20 log10(power)` dB | impl-untested | scene.rs `tick`, sound.rs `blast_db` | |
+| Sound goes round corners through open doors | missing | sound.rs | second half of ROADMAP section 5 |
+| Floors between levels soak up sound (35 wood, 45 stone) | missing | sound.rs | only walls and doors on the line count so far |
+| Footsteps, screams, falls, doors opening make sounds; NPCs wake and turn to them | missing | life/, scene.rs | second half of ROADMAP section 5 |
+| Sound through water | missing | | out of scope for now |
+
 ## World generation
 
 | Interaction | Status | Lives in | Test / note |

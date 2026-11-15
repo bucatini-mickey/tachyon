@@ -15,7 +15,7 @@
 //!  grid/     material tile world things clock     the cell world and what is in it
 //!            movement vessel scene                moving through it; rafts; the whole ticked together
 //!  sim/      fluid gas heat light flames          physics over awake chunks
-//!            weather projectile                   wind and rain; things in flight and explosions
+//!            weather projectile sound             wind and rain; things in flight and explosions; sound
 //!  life/     body needs mind ai path species      creatures
 //!  sea/      field craft ballistics sight         open water as fields; ships posed on it; shot; long sight
 //!  make/     atlas blueprint worldgen lang library   authored world maps and structures; generated names; Tokamak files
@@ -46,7 +46,7 @@ pub use draw::{display, frame, palette, ui, view};
 pub use grid::{clock, material, movement, scene, things, tile, vessel, world};
 pub use make::{atlas, blueprint, lang, library, worldgen};
 pub use sea::{ballistics, craft, sight};
-pub use sim::{projectile, weather};
+pub use sim::{projectile, sound, weather};
 
 /// Everything a game usually needs, in one import.
 pub mod prelude {
@@ -66,6 +66,7 @@ pub mod prelude {
     pub use crate::projectile::{Blast, Projectile};
     pub use crate::rng::{hash3, Rng};
     pub use crate::scene::{Forwarded, Scene, SceneEvent, StopOn, Stopped};
+    pub use crate::sound::{Heard, Sound, SoundKind, Voice};
     pub use crate::things::{Flame, Food, KindId, Layer, Thing, ThingId, ThingKind, Things};
     pub use crate::tile::Tile;
     pub use crate::vessel::{Afloat, Vessel};

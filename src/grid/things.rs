@@ -78,7 +78,13 @@ pub struct ThingKind {
     pub food: Option<Food>,
     /// Somewhere to sleep.
     pub bed: bool,
+    /// Decibels a sound loses passing through its cell; for a door only while
+    /// it is closed. `door()` sets [`DOOR_SOUND_LOSS`].
+    pub sound_loss: f32,
 }
+
+/// What a closed door takes off a sound, dB.
+pub const DOOR_SOUND_LOSS: f32 = 18.0;
 
 impl ThingKind {
     pub fn new(name: &str, glyph: char, fg: Rgb, layer: Layer) -> ThingKind {
@@ -98,6 +104,7 @@ impl ThingKind {
             flame: Flame::None,
             food: None,
             bed: false,
+            sound_loss: 0.0,
         }
     }
     pub fn blocking(mut self) -> Self {
@@ -111,6 +118,7 @@ impl ThingKind {
     pub fn door(mut self, open_glyph: char) -> Self {
         self.door = true;
         self.open_glyph = open_glyph;
+        self.sound_loss = DOOR_SOUND_LOSS;
         self
     }
     pub fn light(mut self, color: Rgb, flicker: bool) -> Self {
