@@ -108,6 +108,9 @@ pub struct Mind {
     pub asleep: bool,
     /// Next tick it may act, checks for danger, and reconsiders everything.
     pub next_act: u64,
+    /// Game seconds (clock time) when its next step is due; carries the
+    /// fraction of a tick between steps so speed does not depend on tick length.
+    pub move_due: f64,
     pub next_think: u64,
     pub next_plan: u64,
     /// Something happened (it was hit): reconsider at once.
@@ -131,6 +134,7 @@ impl Mind {
             grudges: Vec::new(),
             asleep: false,
             next_act: 0,
+            move_due: 0.0,
             next_think: 0,
             next_plan: 0,
             alarmed: false,

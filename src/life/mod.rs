@@ -268,7 +268,7 @@ impl Life {
         }
         let hour = clock.hour() as f32;
         for i in 0..self.creatures.len() {
-            ai::act(self, i, world, things, clock.tick, hour);
+            ai::act(self, i, world, things, clock, hour);
         }
         self.stains.step(world, dt, clock.day_secs as f32);
     }

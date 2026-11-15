@@ -55,8 +55,10 @@ pub struct Species {
     pub temperament: Temperament,
     pub diet: Diet,
     pub needs: NeedRates,
-    /// Ticks per step at a walk, when fit (it runs at twice the pace).
-    pub walk: f32,
+    /// Walking speed in metres per second when fit (it runs at twice the pace).
+    /// A human walks about 1.3 m/s. The AI converts it with the clock, so a long
+    /// tick means several cells per tick.
+    pub speed: f32,
     pub blood: Rgb,
     /// The thing kind its body becomes when it dies.
     pub corpse: Option<KindId>,
@@ -81,7 +83,7 @@ fn base(name: &str, plan: BodyPlan, mass: f32) -> Species {
         temperament: Temperament { aggression: 0.3, courage: 0.4, loyalty: 0.3 },
         diet: Diet { plants: true, meat: true, grazes: false },
         needs: NeedRates::default(),
-        walk: 2.0,
+        speed: 1.3,
         blood: RED_BLOOD,
         corpse: None,
         prey: Vec::new(),
@@ -105,7 +107,7 @@ pub fn dog() -> Species {
     s.attacks = vec![Attack::new("bite", "bites", DamageKind::Point, 26.0, Does::BITE)];
     s.temperament = Temperament { aggression: 0.6, courage: 0.8, loyalty: 0.9 };
     s.needs.comfort = (-5.0, 28.0);
-    s.walk = 1.0;
+    s.speed = 1.8;
     s.prey = vec!["rat".into()];
     s
 }
@@ -120,7 +122,7 @@ pub fn cat() -> Species {
     s.diet = Diet { plants: false, meat: true, grazes: false };
     s.needs.comfort = (0.0, 30.0);
     s.needs.fatigue = 2.0; // cats sleep a lot
-    s.walk = 1.0;
+    s.speed = 1.5;
     s.prey = vec!["rat".into()];
     s.wary_of = vec!["dog".into()];
     s.nocturnal = true;
@@ -134,7 +136,7 @@ pub fn rat() -> Species {
     s.temperament = Temperament { aggression: 0.15, courage: 0.1, loyalty: 0.0 };
     s.needs.comfort = (0.0, 32.0);
     s.needs.hunger = 3.0;
-    s.walk = 1.0;
+    s.speed = 1.0;
     s.wary_of = vec!["cat".into(), "dog".into(), "human".into()];
     s.nocturnal = true;
     s
@@ -146,7 +148,7 @@ pub fn sheep() -> Species {
     s.temperament = Temperament { aggression: 0.05, courage: 0.05, loyalty: 0.2 };
     s.diet = Diet { plants: true, meat: false, grazes: true };
     s.needs.comfort = (-10.0, 26.0);
-    s.walk = 3.0;
+    s.speed = 0.9;
     s.wary_of = vec!["dog".into()];
     s
 }

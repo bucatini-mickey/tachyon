@@ -21,6 +21,7 @@
 use super::mind::{Control, Goal, Task};
 use super::path;
 use super::{Life, LifeEvent};
+use crate::clock::Clock;
 use crate::geom::{Pos, DIRS8};
 use crate::movement::{self, Step};
 use crate::things::{ThingId, Things};
@@ -90,7 +91,11 @@ fn bedtime(life: &Life, idx: usize, hour: f32) -> bool {
     }
 }
 
-pub(super) fn act(life: &mut Life, i: usize, world: &mut World, things: &mut Things, tick: u64, hour: f32) {
+/// Most steps one creature takes in a single tick, however long the tick.
+const MAX_STEPS_PER_TICK: u32 = 16;
+
+pub(super) fn act(life: &mut Life, i: usize, world: &mut World, things: &mut Things, clock: &Clock, hour: f32) {
+    let tick = clock.tick;
     {
         let c = &life.creatures[i];
         if !c.alive || c.out || c.mind.control != Control::Ai {
@@ -162,17 +167,44 @@ pub(super) fn act(life: &mut Life, i: usize, world: &mut World, things: &mut Thi
             progress = pursue(life, i, world, things, pos, tick);
         }
     }
-    let _ = progress;
 
-    // When to act next: running is twice as fast as walking; wounds slow it.
+    // When to act next. Speed is in m/s (cells are 1 m), so a step takes
+    // 1/speed seconds of game time: running is twice as fast as walking and
+    // wounds slow it. The time owed is carried in `move_due` (a clock time in
+    // seconds) so the fraction of a tick left over is not lost: halving the tick
+    // length leaves the real walking speed the same.
     let c = &life.creatures[i];
-    let walk = life.species_of(c).walk;
     let pace = match c.mind.goal {
-        Goal::Attack(_) | Goal::Flee(_) | Goal::Escape => 0.5,
+        Goal::Attack(_) | Goal::Flee(_) | Goal::Escape => 2.0,
         _ => 1.0,
     };
-    let ticks = (walk * pace / c.caps.moving.max(0.15)).ceil().max(1.0) as u64;
-    life.creatures[i].mind.next_act = tick + ticks;
+    let speed = (life.species_of(c).speed * pace * c.caps.moving.max(0.15)).max(0.01) as f64;
+    let step_secs = 1.0 / speed;
+    let tps = clock.secs_per_tick;
+    let now = clock.seconds();
+    // `max` drops any idle time: a creature that stood still does not get to
+    // "catch up" with a burst of steps.
+    let mut due = life.creatures[i].mind.move_due.max(now) + step_secs;
+    // A long tick: take further steps while they still fall inside it. (`while`
+    // with an extra condition replaces Python's `while ...: ... break`.)
+    let mut extra = 0;
+    while progress == Progress::Continue && due < now + tps && extra < MAX_STEPS_PER_TICK {
+        let before = things.get(me).map(|t| t.pos());
+        let at = before.unwrap_or(pos);
+        progress = pursue(life, i, world, things, at, tick);
+        // Only walking repeats; standing still (an attack, a meal) acts once a tick.
+        if things.get(me).map(|t| t.pos()) == before {
+            break;
+        }
+        due += step_secs;
+        extra += 1;
+    }
+    let m = &mut life.creatures[i].mind;
+    m.move_due = due;
+    // Act again in the tick that contains `due` (so a step is never late by a
+    // whole tick; the carried `due` keeps the average speed exact).
+    let wait = (((due - now) / tps).floor().max(1.0)) as u64;
+    m.next_act = tick + wait;
 }
 
 fn set_goal(life: &mut Life, i: usize, g: Goal, force: bool) {

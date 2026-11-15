@@ -426,3 +426,32 @@ fn a_half_length_day_doubles_hunger_per_tick() {
     assert!(full > 0.0, "{full}");
     assert!((half / full - 2.0).abs() < 0.01, "{full} vs {half}");
 }
+
+/// Game seconds a human takes to walk 100 m along open ground at this tick length.
+fn secs_to_walk_100m(secs_per_tick: f64) -> f64 {
+    let mut s = field(110, 3);
+    s.clock = Clock::new(secs_per_tick, 12.0);
+    let k = kinds(&mut s);
+    let human = s.life.add_species(species::human());
+    let a = spawn(&mut s, k.person, human, Pos::new(2, 1, 1));
+    s.life.get_mut(a).unwrap().mind.routine = Routine::new().with(0.0, 24.0, Task::Stay { at: Pos::new(102, 1, 1) });
+    let mut ticks = 0u64;
+    while pos(&s, a).x < 102 && ticks < 5000 {
+        s.tick();
+        ticks += 1;
+    }
+    assert_eq!(pos(&s, a).x, 102, "never arrived");
+    ticks as f64 * secs_per_tick
+}
+
+#[test]
+fn walking_speed_is_metres_per_second_whatever_the_tick() {
+    // A human walks about 1.3 m/s: 100 m in about 77 s, at a 2 s tick (several
+    // cells per tick) and at shorter ones alike.
+    let t2 = secs_to_walk_100m(2.0);
+    assert!((t2 - 77.0).abs() <= 4.0, "2 s tick: {t2} s");
+    let t1 = secs_to_walk_100m(1.0);
+    let t05 = secs_to_walk_100m(0.5);
+    assert!((t1 - t05).abs() / t05 <= 0.05, "halving the tick: {t1} s vs {t05} s");
+    assert!((t2 - t1).abs() / t1 <= 0.05, "halving the tick: {t2} s vs {t1} s");
+}
