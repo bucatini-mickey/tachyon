@@ -17,6 +17,13 @@
 //! current goal is finished or every few dozen ticks. A creature keeps its
 //! goal if the new choice is the same kind of thing, so it doesn't keep
 //! changing its mind about where to wander.
+//!
+//! Hearing ([`react`], run by the scene after each tick for every creature
+//! with a mind): a loud enough noise wakes a sleeper (a dog sooner than a
+//! person; the footsteps of its own faction don't), and a scream or a blast
+//! makes it turn that way and, unless it is fleeing or fighting, walk a few
+//! steps toward it to look. This is a small stand-in for the stimuli of
+//! NPC_MINDS step 3.
 
 use super::mind::{Control, Goal, Task};
 use super::path;
@@ -24,6 +31,7 @@ use super::{Life, LifeEvent};
 use crate::clock::Clock;
 use crate::geom::{Pos, DIRS8};
 use crate::movement::{self, Step};
+use crate::sound::{Heard, Sound, SoundKind};
 use crate::things::{ThingId, Things};
 use crate::world::World;
 use std::collections::HashSet;
@@ -93,6 +101,87 @@ fn bedtime(life: &Life, idx: usize, hour: f32) -> bool {
 
 /// Most steps one creature takes in a single tick, however long the tick.
 const MAX_STEPS_PER_TICK: u32 = 16;
+
+/// A sleeper wakes at a sound this many dB above the faintest it can hear
+/// (its species' `hearing`): with a quiet background a person needs a sound
+/// 2 dB over the background, a dog one 8 dB under it.
+pub const WAKE_OVER: f32 = 12.0;
+/// How many cells a creature walks toward a scream or a blast to look.
+pub const LOOK_STEPS: i32 = 4;
+/// Game seconds a creature woken by a noise lies awake listening before it
+/// may go back to sleep.
+const LISTEN_SECS: f64 = 20.0;
+
+/// What creature `i`, at `pos`, does about the sounds it heard this tick
+/// (`heard`, from `sound::hear` over `sounds`). Its own noises are ignored.
+#[allow(clippy::too_many_arguments)]
+pub fn react(life: &mut Life, i: usize, world: &World, things: &Things, sounds: &[Sound], heard: &[Heard], pos: Pos, clock: &Clock) {
+    let c = &life.creatures[i];
+    if !c.alive || c.out || c.mind.control != Control::Ai {
+        return;
+    }
+    let (me, hearing, faction, asleep) = (c.thing, life.species_of(c).hearing, c.mind.faction, c.mind.asleep);
+    // A sleeper is used to its own household moving about: their footsteps
+    // don't wake it (a stranger's do).
+    let familiar = |s: &Sound| asleep && s.kind == SoundKind::Footstep && s.source.and_then(|w| life.get(w)).is_some_and(|o| o.mind.faction == faction);
+    // The loudest sound, and the loudest alarming one.
+    let (mut loudest, mut alarm): (Option<&Heard>, Option<&Heard>) = (None, None);
+    for h in heard {
+        let s = &sounds[h.sound];
+        if s.source == Some(me) || familiar(s) {
+            continue;
+        }
+        if loudest.map_or(true, |l| h.db_over > l.db_over) {
+            loudest = Some(h);
+        }
+        if matches!(s.kind, SoundKind::Scream | SoundKind::Blast) && alarm.map_or(true, |a| h.db_over > a.db_over) {
+            alarm = Some(h);
+        }
+    }
+    let Some(loudest) = loudest else { return };
+    let tick = clock.tick;
+    let toward = |h: &Heard| Pos::new(pos.x + h.from.0, pos.y + h.from.1, pos.z + h.from.2);
+    let m = &mut life.creatures[i].mind;
+    if asleep {
+        if loudest.db_over - hearing < WAKE_OVER {
+            return;
+        }
+        m.asleep = false;
+        m.next_think = 0;
+        // Lie awake listening for a while rather than drop straight off again.
+        let listen = (LISTEN_SECS / clock.secs_per_tick).ceil().max(1.0) as u64;
+        m.goal = Goal::Idle(tick + listen);
+        m.next_plan = tick + listen;
+        m.path.clear();
+        m.heard = Some(toward(loudest));
+        life.events.push(LifeEvent::Woke(me));
+    }
+    let Some(a) = alarm else { return };
+    let m = &mut life.creatures[i].mind;
+    m.heard = Some(toward(a));
+    if matches!(m.goal, Goal::Flee(_) | Goal::Escape | Goal::Attack(_)) {
+        return;
+    }
+    // A few cells along the way it came from, as far as one can stand.
+    let (fx, fy) = (a.from.0 as f32, a.from.1 as f32);
+    let len = fx.hypot(fy);
+    if len < 1.5 {
+        return; // right here: nowhere to go
+    }
+    let n = LOOK_STEPS.min(len.round() as i32 - 1);
+    let spot = (1..=n).rev().map(|k| pos.offset((fx * k as f32 / len).round() as i32, (fy * k as f32 / len).round() as i32, 0)).find(|&q| {
+        movement::can_occupy(world, things, q) && !path::hazard(world, q)
+    });
+    if let Some(q) = spot {
+        if m.goal != Goal::Look(q) {
+            m.goal = Goal::Look(q);
+            m.path.clear();
+            m.stuck = 0;
+        }
+        // Give it time to get there before the next full rethink.
+        m.next_plan = tick + PLAN_EVERY;
+    }
+}
 
 pub(super) fn act(life: &mut Life, i: usize, world: &mut World, things: &mut Things, clock: &Clock, hour: f32) {
     let tick = clock.tick;
@@ -457,6 +546,15 @@ fn pursue(life: &mut Life, i: usize, world: &mut World, things: &mut Things, pos
             }
         }
         Goal::Go(to) => walk_to(life, i, world, things, pos, to, 0),
+        Goal::Look(to) => match walk_to(life, i, world, things, pos, to, 0) {
+            // There: stand and look about until the next full rethink.
+            Progress::Done => {
+                let m = &mut life.creatures[i].mind;
+                m.goal = Goal::Idle(m.next_plan.max(tick + 1));
+                Progress::Continue
+            }
+            p => p,
+        },
         Goal::Eat(food) => {
             let Some(fp) = things.get(food).map(|t| t.pos()) else { return Progress::Done };
             if fp.z == pos.z && fp.dist2d(pos) <= 1 {

@@ -4,6 +4,7 @@
 //!     cargo run --release --example sandbox -- --size 512x512x16      (stress test)
 //!     cargo run --release --example sandbox -- --bench 600             (headless timing)
 //!     cargo run --release --example sandbox -- --snapshot frame.html   (render one frame to a file)
+//!     cargo run --release --example sandbox -- --watch 60 --bolt 84,65,5  (print what happens and is heard)
 
 mod mapgen;
 
@@ -86,6 +87,49 @@ struct Sandbox {
     /// The next direction attacks instead of walking.
     attacking: bool,
     weapon: usize,
+    /// No "You hear footsteps" line again before this tick (they would fill
+    /// the log whenever someone walks past behind a wall).
+    steps_quiet_until: u64,
+}
+
+/// What a sound is, for "You hear ...".
+fn sound_noun(k: SoundKind) -> &'static str {
+    match k {
+        SoundKind::Speech(Voice::Whisper) => "a whisper",
+        SoundKind::Speech(Voice::Talk) => "voices",
+        SoundKind::Speech(Voice::Shout) => "a shout",
+        SoundKind::Scream => "a scream",
+        SoundKind::Footstep => "footsteps",
+        SoundKind::Impact => "a heavy blow",
+        SoundKind::Blast => "an explosion",
+        SoundKind::Collapse => "something give way",
+        SoundKind::Fire => "the crackle of fire",
+        SoundKind::Water => "a splash",
+        SoundKind::Animal => "an animal",
+        SoundKind::Bell => "a bell",
+        SoundKind::Door => "a door open",
+        SoundKind::Custom(_) => "a noise",
+    }
+}
+
+/// The way an offset points, as a compass direction (north is up the map).
+fn compass(dx: i32, dy: i32, dz: i32) -> String {
+    if dx.abs().max(dy.abs()) <= 1 {
+        return match dz.signum() {
+            1 => "above you".into(),
+            -1 => "below you".into(),
+            _ => "close by".into(),
+        };
+    }
+    const NAMES: [&str; 8] = ["east", "south-east", "south", "south-west", "west", "north-west", "north", "north-east"];
+    // atan2 with y growing south, so 90 degrees is south; eighths of a turn.
+    let a = (dy as f32).atan2(dx as f32);
+    let k = ((a / std::f32::consts::FRAC_PI_4).round() as i32).rem_euclid(8) as usize;
+    let mut s = format!("to the {}", NAMES[k]);
+    if dz != 0 {
+        s += if dz > 0 { ", above" } else { ", below" };
+    }
+    s
 }
 
 impl Sandbox {
@@ -111,6 +155,7 @@ impl Sandbox {
             was_paused: false,
             attacking: false,
             weapon: 0,
+            steps_quiet_until: 0,
         };
         // Two characters per cell looks square in most terminal fonts.
         s.view.wide = true;
@@ -195,6 +240,36 @@ impl Sandbox {
                 }
             }
         }
+    }
+
+    /// "You hear ..." lines for this tick's sounds that you heard but could
+    /// not see the source of, one per kind, with the way they came from.
+    fn heard_lines(&mut self) -> Vec<String> {
+        let Some(c) = self.scene.life.get(self.player) else { return Vec::new() };
+        if !c.alive || c.out || c.mind.asleep {
+            return Vec::new();
+        }
+        let hearing = self.scene.life.species_of(c).hearing;
+        let p = self.player_pos();
+        let tick = self.scene.clock.tick;
+        let mut kinds: Vec<SoundKind> = Vec::new();
+        let mut out = Vec::new();
+        for h in self.scene.hear(p, hearing) {
+            let s = self.scene.sounds[h.sound];
+            let seen = self.see_all || self.view.visible(s.pos);
+            if s.source == Some(self.player) || seen || kinds.contains(&s.kind) {
+                continue;
+            }
+            if s.kind == SoundKind::Footstep {
+                if tick < self.steps_quiet_until {
+                    continue;
+                }
+                self.steps_quiet_until = tick + 30;
+            }
+            kinds.push(s.kind);
+            out.push(format!("You hear {} {}.", sound_noun(s.kind), compass(h.from.0, h.from.1, h.from.2)));
+        }
+        out
     }
 
     fn walk(&mut self, dx: i32, dy: i32) {
@@ -542,6 +617,11 @@ impl Game for Sandbox {
             }
         }
         self.report_life();
+        for m in self.heard_lines() {
+            if self.log.front() != Some(&m) {
+                self.say(m);
+            }
+        }
         if let Some(m) = woken {
             self.say(m);
         }
@@ -894,8 +974,12 @@ fn main() -> io::Result<()> {
         let mut worst = 0u64;
         let mut awake = 0usize;
         let mut parts = [0u64; 4];
+        let (mut sound_us, mut noise_us, mut sounds) = (0u64, 0u64, 0usize);
         for _ in 0..n {
             game.tick();
+            sound_us += game.scene.sound_us;
+            noise_us += game.scene.noise_us;
+            sounds += game.scene.sounds.len();
             let s = &game.scene.sim.stats;
             worst = worst.max(s.tick_us);
             awake += s.awake_chunks;
@@ -920,6 +1004,15 @@ fn main() -> io::Result<()> {
             ms(parts[2]),
             ms(parts[3])
         );
+        let alive = game.scene.life.creatures.iter().filter(|c| c.alive).count();
+        println!(
+            "  sound_us {:.1} per tick: noise floor {:.1}, making and hearing sounds {:.1} ({:.1} sounds a tick, {alive} creatures)",
+            sound_us as f64 / n as f64,
+            noise_us as f64 / n as f64,
+            (sound_us - noise_us) as f64 / n as f64,
+            sounds as f64 / n as f64
+        );
+        println!("  round-corner searches {}", game.scene.sound_searches());
         let (liquid1, heat1) = bench_totals(&game.scene.world);
         println!(
             "  fluid total {liquid0} -> {liquid1} ({:+} of 64ths), mean heat {heat0:.4} -> {heat1:.4} C ({:+.4})",
@@ -944,10 +1037,23 @@ fn main() -> io::Result<()> {
     }
 
     // Run the village for a while and print what the creatures did.
+    // With --bolt x,y,z a firebolt is thrown first; "You hear ..." lines are
+    // what the player hears of things out of sight.
     if let Some(n) = arg("--watch").and_then(|s| s.parse::<u32>().ok()) {
+        if let Some(at) = arg("--at") {
+            let v: Vec<i32> = at.split(',').filter_map(|p| p.parse().ok()).collect();
+            game.scene.things.move_to(game.player, Pos::new(v[0], v[1], v[2]));
+        }
+        if let Some(t) = arg("--bolt") {
+            let v: Vec<i32> = t.split(',').filter_map(|p| p.parse().ok()).collect();
+            game.throw_bolt(Pos::new(v[0], v[1], v[2]));
+        }
+        let mut f = Frame::new(120, 40);
         let t = Instant::now();
         let mut worst = 0.0f64;
         for _ in 0..n {
+            // Drawing works out what the player can see, so only unseen sounds are reported.
+            game.draw(&mut f, &LoopStats::default());
             let s = Instant::now();
             game.scene.tick();
             worst = worst.max(s.elapsed().as_secs_f64() * 1000.0);
@@ -958,6 +1064,9 @@ fn main() -> io::Result<()> {
                 }
             }
             game.scene.life.events.clear();
+            for line in game.heard_lines() {
+                println!("{}  {line}", game.scene.clock.label());
+            }
         }
         println!("{n} ticks in {:.2} s, worst tick {worst:.1} ms", t.elapsed().as_secs_f64());
         let life = &game.scene.life;

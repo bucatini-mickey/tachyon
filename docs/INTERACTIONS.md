@@ -158,9 +158,12 @@ Test files are in `tests/`. Sim files are in `src/sim/`.
 | Burning cells lift the floor; a new fire makes a sound | tested-pass | sound.rs `Noise`, scene.rs `tick` | sound.rs `a_fire_starting_is_heard_and_burning_lifts_the_floor` |
 | Flowing water (`flow_x/flow_y`) lifts the floor | impl-untested | sound.rs `Noise` | |
 | A blast makes a sound of `100 + 20 log10(power)` dB | impl-untested | scene.rs `tick`, sound.rs `blast_db` | |
-| Sound goes round corners through open doors | missing | sound.rs | second half of ROADMAP section 5 |
-| Floors between levels soak up sound (35 wood, 45 stone) | missing | sound.rs | only walls and doors on the line count so far |
-| Footsteps, screams, falls, doors opening make sounds; NPCs wake and turn to them | missing | life/, scene.rs | second half of ROADMAP section 5 |
+| Sound goes round corners through open doors | tested-pass | sound.rs `Router` | sound.rs `a_scream_in_a_stone_room_is_heard_down_the_corridor_from_the_open_door` |
+| Floors between levels soak up sound (35 wood, 45 stone) | tested-pass (straight line) | sound.rs `slab_loss` | sound.rs `a_floor_slab_muffles_footsteps_overhead`; the corner search stays on one level |
+| Footsteps by mass and floor (sand quiet, wood loud), only near a listener | tested-pass | scene.rs `footsteps`, sound.rs `footstep_db`, material.rs `footfall` | sound.rs `a_footstep_wakes_a_sleeping_dog_but_not_a_sleeping_person` |
+| A sleeper wakes above its species' hearing + 12 dB (dog -20, human -10); its own faction's footsteps don't wake it | tested-pass | ai.rs `react`, species.rs `hearing` | same test |
+| A scream or blast turns AI toward it; it walks up to 4 cells to look unless fleeing or fighting | tested-pass | ai.rs `react`, `Goal::Look` | sound.rs `villagers_walk_toward_a_scream` |
+| Blows, screams at bad wounds (severity 0.4+), falls, deaths, walls giving way, doors opening make sounds | impl-untested | life/mod.rs `sounds`, scene.rs `gather_sounds` | seen in `sandbox --watch` |
 | Sound through water | missing | | out of scope for now |
 
 ## World generation

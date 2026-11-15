@@ -105,6 +105,7 @@ pub fn explode(world: &mut World, things: &mut Things, at: Pos, b: &Blast, rng: 
             world.set_tile(p, Tile::Open, crate::material::AIR);
         }
         report.broken += 1;
+        world.note_crumbled(p);
         let up = p.up();
         if let Some(j) = world.index(up) {
             if world.tile[j] != Tile::Open && !world.tile[j].is_wall() {

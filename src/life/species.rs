@@ -5,6 +5,7 @@
 use super::body::{BodyPlan, DamageKind, Does, Tissue};
 use super::needs::NeedRates;
 use crate::color::Rgb;
+use crate::sound::{DOG_HEARING, HUMAN_HEARING};
 use crate::things::KindId;
 
 /// A way of hurting something.
@@ -70,6 +71,10 @@ pub struct Species {
     pub nocturnal: bool,
     /// Can swim (others flounder: they tire and their breath runs short).
     pub swims: bool,
+    /// How far below the background noise it still picks a sound out, dB
+    /// (lower is keener): human `sound::HUMAN_HEARING` (-10), dog
+    /// `sound::DOG_HEARING` (-20). Also sets how easily it is woken.
+    pub hearing: f32,
 }
 
 pub const RED_BLOOD: Rgb = Rgb(150, 18, 22);
@@ -90,6 +95,7 @@ fn base(name: &str, plan: BodyPlan, mass: f32) -> Species {
         wary_of: Vec::new(),
         nocturnal: false,
         swims: true,
+        hearing: HUMAN_HEARING,
     }
 }
 
@@ -109,6 +115,7 @@ pub fn dog() -> Species {
     s.needs.comfort = (-5.0, 28.0);
     s.speed = 1.8;
     s.prey = vec!["rat".into()];
+    s.hearing = DOG_HEARING;
     s
 }
 
@@ -127,6 +134,7 @@ pub fn cat() -> Species {
     s.wary_of = vec!["dog".into()];
     s.nocturnal = true;
     s.swims = false;
+    s.hearing = -18.0; // cats hear nearly as well as dogs
     s
 }
 
@@ -139,6 +147,7 @@ pub fn rat() -> Species {
     s.speed = 1.0;
     s.wary_of = vec!["cat".into(), "dog".into(), "human".into()];
     s.nocturnal = true;
+    s.hearing = -15.0;
     s
 }
 

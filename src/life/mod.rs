@@ -28,6 +28,7 @@ use crate::material::MatId;
 use crate::movement;
 use crate::projectile::{shielding, Blast};
 use crate::rng::Rng;
+use crate::sound::{self, level, Sound, SoundKind};
 use crate::things::{ThingId, Things};
 use crate::world::{World, FULL};
 use body::{Body, Capacities, Cause, DamageKind, Does, Height, Injury, Tissue, WoundKind};
@@ -151,6 +152,22 @@ impl LifeEvent {
     }
 }
 
+/// A wound at least this severe (0..1), or a limb cut off, makes a creature
+/// cry out.
+pub const SCREAM_AT: f32 = 0.4;
+/// Most sounds `Life::sounds` keeps before the scene collects them.
+const SOUNDS_MAX: usize = 256;
+
+fn cries_out(inj: &Injury) -> bool {
+    inj.severed.is_some() || inj.worst().is_some_and(|w| w.3 >= SCREAM_AT)
+}
+
+fn make_sound(sounds: &mut Vec<Sound>, at: Pos, db: f32, kind: SoundKind, who: ThingId) {
+    if sounds.len() < SOUNDS_MAX {
+        sounds.push(Sound { source: Some(who), ..Sound::new(at, db, kind) });
+    }
+}
+
 /// ml in one unit of liquid (a 64th of a cubic metre).
 const ML_PER_UNIT: f32 = 1_000_000.0 / FULL as f32;
 /// Fall damage per level beyond the first, roughly.
@@ -162,6 +179,9 @@ pub struct Life {
     index: HashMap<ThingId, usize>,
     pub stains: Stains,
     pub events: Vec<LifeEvent>,
+    /// Noises creatures made (blows landing, screams at bad wounds, falls,
+    /// bodies dropping), collected into `Scene::sounds` each tick.
+    pub sounds: Vec<Sound>,
     /// Liquids creatures drink.
     pub drinkable: Vec<MatId>,
     /// Floors grazing animals eat.
@@ -180,6 +200,7 @@ impl Life {
             index: HashMap::new(),
             stains: Stains::default(),
             events: Vec::new(),
+            sounds: Vec::new(),
             drinkable: Vec::new(),
             grazing: Vec::new(),
             rng: Rng::new(seed ^ 0x11FE),
@@ -276,7 +297,7 @@ impl Life {
     fn physiology(&mut self, i: usize, world: &mut World, things: &mut Things, dt: f32, day: f32) {
         // Borrow the fields separately so a creature and its species can be
         // used at the same time.
-        let Life { species, creatures, stains, events, rng, .. } = self;
+        let Life { species, creatures, stains, events, sounds, rng, .. } = self;
         let c = &mut creatures[i];
         if !c.alive {
             return;
@@ -306,6 +327,11 @@ impl Life {
                 }
                 c.mind.asleep = false;
                 injury = Some(all);
+            }
+            let thud = if soft { level::SPEECH } else { sound::thud_db(sp.mass) + 6.0 * (levels - 1) as f32 };
+            make_sound(sounds, p, thud, if soft { SoundKind::Water } else { SoundKind::Impact }, id);
+            if injury.as_ref().is_some_and(cries_out) {
+                make_sound(sounds, p, level::SCREAM, SoundKind::Scream, id);
             }
             events.push(LifeEvent::Fell { who: id, levels, injury });
         }
@@ -362,6 +388,9 @@ impl Life {
                     if !injury.wounds.is_empty() {
                         c.mind.alarmed = true;
                         c.mind.asleep = false;
+                        if cries_out(&injury) {
+                            make_sound(sounds, pos, level::SCREAM, SoundKind::Scream, id);
+                        }
                         events.push(LifeEvent::Burned { who: id, injury });
                     }
                 }
@@ -394,6 +423,11 @@ impl Life {
         }
 
         if let Some(cause) = c.body.fatal(plan).or_else(|| c.needs.fatal(underwater, day)) {
+            // A body dropping where it stood (one already down, or under
+            // water, makes no sound of it).
+            if !c.out && !swimming {
+                make_sound(sounds, pos, sound::thud_db(sp.mass), SoundKind::Impact, id);
+            }
             Self::kill(c, sp, things, events, cause);
         }
     }
@@ -457,7 +491,7 @@ impl Life {
         let t_pos = things.get(target)?.pos();
         let (a_caps, a_mass) = (self.creatures[ai].caps, self.species_of(&self.creatures[ai]).mass);
 
-        let Life { species, creatures, events, rng, .. } = self;
+        let Life { species, creatures, events, sounds, rng, .. } = self;
         let t = &mut creatures[ti];
         let sp = &species[t.species as usize];
         let down = t.out || t.mind.asleep;
@@ -489,6 +523,12 @@ impl Life {
         // Hitting back at someone who started it doesn't make enemies of
         // their friends.
         let retaliating = creatures[ai].mind.anger_at(target) > 0.1 && creatures[ai].mind.control == Control::Ai;
+        if let Some(inj) = &injury {
+            make_sound(sounds, t_pos, sound::blow_db(attack.force), SoundKind::Impact, attacker);
+            if cries_out(inj) {
+                make_sound(sounds, t_pos, level::SCREAM, SoundKind::Scream, target);
+            }
+        }
         events.push(LifeEvent::Struck { attacker, target, attack, injury: injury.clone() });
 
         // Friends close by come to help.
@@ -511,7 +551,7 @@ impl Life {
 
     /// An explosion at `at`: creatures in reach are thrown about and burned.
     pub fn blast(&mut self, world: &World, things: &Things, at: Pos, b: &Blast, owner: Option<ThingId>) {
-        let Life { species, creatures, events, rng, .. } = self;
+        let Life { species, creatures, events, sounds, rng, .. } = self;
         for c in creatures.iter_mut().filter(|c| c.alive) {
             let Some(p) = things.get(c.thing).map(|t| t.pos()) else { continue };
             let d = (((p.x - at.x).pow(2) + (p.y - at.y).pow(2) + (p.z - at.z).pow(2)) as f32).sqrt();
@@ -540,6 +580,9 @@ impl Life {
             }
             c.mind.asleep = false;
             c.mind.alarmed = true;
+            if injuries.iter().any(cries_out) {
+                make_sound(sounds, p, level::SCREAM, SoundKind::Scream, c.thing);
+            }
             if let Some(o) = owner {
                 if o != c.thing {
                     c.mind.resent(o, 1.0, things.get(o).map(|t| t.pos()).unwrap_or(at));
@@ -688,6 +731,7 @@ impl Life {
             Goal::Attack(t) => format!("attacking {}", self.name(things, *t)),
             Goal::Flee(t) => format!("fleeing from {}", self.name(things, *t)),
             Goal::Escape => "escaping the fire".into(),
+            Goal::Look(_) => "going to see what the noise was".into(),
         }
     }
 

@@ -1,5 +1,8 @@
-//! Sound: loss through walls and doors, and the noise floor (ROADMAP section 5).
+//! Sound: loss through walls and doors, the noise floor, and creatures
+//! hearing (ROADMAP section 5).
 
+use tachyon::life::mind::Goal;
+use tachyon::life::species;
 use tachyon::prelude::*;
 use tachyon::sound::{self, level, HUMAN_HEARING};
 
@@ -162,4 +165,104 @@ fn a_sound_with_nothing_in_the_way_never_runs_the_search() {
     wall_at(&mut s, 10, "wood");
     s.hear(Pos::new(15, 5, 1), HUMAN_HEARING);
     assert_eq!(s.sound_searches(), 1);
+}
+
+/// Open ground with a grass floor (soft underfoot), two seconds a tick, noon.
+fn meadow(w: i32, h: i32) -> Scene {
+    let mats = Materials::standard();
+    let (granite, grass) = (mats.id("granite"), mats.id("grass"));
+    let mut world = World::new(w, h, 4, mats);
+    for y in 0..h {
+        for x in 0..w {
+            world.set_tile(Pos::new(x, y, 0), Tile::Wall, granite);
+            world.set_tile(Pos::new(x, y, 1), Tile::Floor, grass);
+        }
+    }
+    let mut s = Scene::new(world, Things::new(), Clock::new(2.0, 12.0), 5);
+    s.sim.fluids = false;
+    s
+}
+
+fn creature_kind(s: &mut Scene) -> KindId {
+    s.things.add_kind(ThingKind::new("creature", '@', Rgb::WHITE, Layer::Creature).blocking())
+}
+
+#[test]
+fn a_footstep_wakes_a_sleeping_dog_but_not_a_sleeping_person() {
+    let mut s = meadow(24, 20);
+    let (human, dog) = (s.life.add_species(species::human()), s.life.add_species(species::dog()));
+    let k = creature_kind(&mut s);
+    // Two sleepers whose routine says sleep all day, 3 m either side of
+    // where someone will walk past.
+    let sleeper = |s: &mut Scene, sp: SpeciesId, p: Pos| {
+        let id = s.things.spawn(k, p);
+        let c = s.life.add(id, sp, Control::Ai, 1);
+        c.mind.routine = Routine::new().with(0.0, 24.0, Task::Sleep { at: None });
+        c.mind.goal = Goal::Sleep(None);
+        c.mind.asleep = true;
+        id
+    };
+    let rex = sleeper(&mut s, dog, Pos::new(10, 7, 1));
+    let ann = sleeper(&mut s, human, Pos::new(10, 13, 1));
+    let walker = s.things.spawn(k, Pos::new(9, 10, 1));
+    s.life.add(walker, human, Control::Player, 0);
+    let asleep = |s: &Scene, id: ThingId| s.life.get(id).unwrap().mind.asleep;
+    for _ in 0..5 {
+        s.tick();
+    }
+    assert!(asleep(&s, rex) && asleep(&s, ann), "something else woke them");
+
+    assert!(matches!(movement::step(&s.world, &mut s.things, walker, 1, 0), Step::Moved(_)));
+    s.tick();
+    let step = s.sounds.iter().find(|x| x.kind == SoundKind::Footstep && x.source == Some(walker)).expect("the step made no sound");
+    // A person on grass: 18 + 10 log10(70) - 6 = about 30 dB.
+    assert!((step.db - 30.45).abs() < 0.1, "a footstep on grass of {} dB", step.db);
+    assert!(!asleep(&s, rex), "the dog slept through a footstep 3 m away");
+    assert!(asleep(&s, ann), "a soft footstep 3 m away woke the person");
+    // The person heard it, just not enough to wake.
+    assert!(!s.hear(Pos::new(10, 13, 1), HUMAN_HEARING).is_empty());
+}
+
+#[test]
+fn villagers_walk_toward_a_scream() {
+    let mut s = meadow(48, 24);
+    let human = s.life.add_species(species::human());
+    let k = creature_kind(&mut s);
+    let villagers: Vec<ThingId> = [(36, 2), (38, 12), (36, 22)]
+        .iter()
+        .map(|&(x, y)| {
+            let id = s.things.spawn(k, Pos::new(x, y, 1));
+            s.life.add(id, human, Control::Ai, 1);
+            id
+        })
+        .collect();
+    let scream = Pos::new(6, 12, 1);
+    let dist = |s: &Scene, id: ThingId| s.things.get(id).unwrap().pos().dist2d(scream);
+    let before: Vec<i32> = villagers.iter().map(|&v| dist(&s, v)).collect();
+    s.sounds.push(Sound::new(scream, level::SCREAM, SoundKind::Scream));
+    s.tick();
+    for &v in &villagers {
+        let m = &s.life.get(v).unwrap().mind;
+        assert!(matches!(m.goal, Goal::Look(_)), "{:?} did not go to look", m.goal);
+        let turned = m.heard.expect("did not turn toward the scream");
+        assert!(turned.x < 20, "turned toward {turned:?}");
+    }
+    for _ in 0..3 {
+        s.tick();
+    }
+    for (k, &v) in villagers.iter().enumerate() {
+        let now = dist(&s, v);
+        assert!(now <= before[k] - 3, "villager {k} went from {} to {now} cells from the scream", before[k]);
+    }
+}
+#[test]
+fn a_floor_slab_muffles_footsteps_overhead() {
+    let mut s = field(12);
+    let wood = s.world.mats.id("wood");
+    s.world.set_tile(Pos::new(5, 5, 2), Tile::Floor, wood);
+    let (above, below) = (Pos::new(5, 5, 2), Pos::new(5, 5, 1));
+    assert_eq!(sound::wall_loss(&s.world, &s.things, above, below), 35.0);
+    assert_eq!(sound::wall_loss(&s.world, &s.things, below, above), 35.0);
+    // Beside it on the same level nothing is in the way.
+    assert_eq!(sound::wall_loss(&s.world, &s.things, above, Pos::new(8, 5, 2)), 0.0);
 }

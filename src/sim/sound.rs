@@ -14,13 +14,20 @@
 //! When a wall is in the way, [`Router`] also searches round the corner
 //! through open cells and doors, and the louder route wins.
 //!
-//! Not yet (second half of section 5): floor slabs between levels, and wiring
-//! footsteps and life events.
+//! The scene fills `Scene::sounds` from what happens in a tick: blows,
+//! screams, falls and deaths (`Life::sounds`), blasts, walls giving way
+//! (`World::crumbled`), fires starting, doors opening
+//! (`Things::doors_opened`) and footsteps ([`footstep_db`], only near a
+//! listener). Creatures with a mind then listen (`life::ai::react`).
+//!
+//! Floor slabs muffle a sound on the straight line ([`slab_loss`]); the
+//! round-the-corner search stays on one level (no stairwells yet).
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::geom::Pos;
+use crate::material::Material;
 use crate::things::{ThingId, Things};
 use crate::world::{World, CHUNK};
 
@@ -38,11 +45,38 @@ pub mod level {
     pub const CANNON: f32 = 160.0;
     /// A fire catching.
     pub const FIRE: f32 = 60.0;
+    /// A door opening.
+    pub const DOOR: f32 = 50.0;
 }
 
 /// The level of a blast of this `power` (see `projectile::Blast`).
 pub fn blast_db(power: f32) -> f32 {
     100.0 + 20.0 * power.max(1.0).log10()
+}
+
+/// A blow landing with this `force` (see `species::Attack`): a punch (12)
+/// about 72 dB, an axe (70) about 87.
+pub fn blow_db(force: f32) -> f32 {
+    50.0 + 20.0 * force.max(1.0).log10()
+}
+
+/// A body of `mass` kg hitting the ground: a person about 63 dB.
+pub fn thud_db(mass: f32) -> f32 {
+    45.0 + 10.0 * mass.max(0.1).log10()
+}
+
+/// One footstep of a creature of `mass` kg on a floor whose material has
+/// this `footfall` (`Material::footfall`: sand -10, stone 0, wood +6),
+/// within [`level::FOOTSTEP`]. A person on stone is about 36 dB, on wood 42.
+pub fn footstep_db(mass: f32, footfall: f32) -> f32 {
+    (18.0 + 10.0 * mass.max(0.01).log10() + footfall).clamp(level::FOOTSTEP.0, level::FOOTSTEP.1)
+}
+
+/// How far a sound of `db` carries in open air before it sinks below what a
+/// listener with `hearing_db` can pick out of a quiet background. Used to skip
+/// footsteps with nobody near enough to hear them.
+pub fn reach(db: f32, hearing_db: f32) -> f32 {
+    10f32.powf((db - QUIET - hearing_db) / 20.0)
 }
 
 /// How far below the background a listener can still pick a sound out, for
@@ -83,6 +117,7 @@ pub enum SoundKind {
     Water,
     Animal,
     Bell,
+    Door,
     Custom(u16),
 }
 
@@ -126,20 +161,40 @@ pub struct Heard {
 /// sound is carried by the building itself, so more stone stops mattering.
 pub const MAX_WALL_LOSS: f32 = 60.0;
 
-/// dB lost to walls and closed doors strictly between `a` and `b`, on the
-/// straight line joining them (sampled like `projectile::shielding`), capped
-/// at [`MAX_WALL_LOSS`].
+/// dB a floor slab of this material takes off a sound passing up or down
+/// through it: wood 35, stone and soil 45 (thinner than a wall, but there is
+/// no gap round it).
+pub fn slab_loss(m: &Material) -> f32 {
+    (m.sound_loss + 13.0).min(45.0)
+}
+
+/// dB lost to walls, closed doors and floor slabs between `a` and `b`, on
+/// the straight line joining them (sampled like `projectile::shielding`),
+/// capped at [`MAX_WALL_LOSS`]. A slab counts where the line passes up or
+/// down into a cell with a floor (so someone walking overhead is muffled).
 pub fn wall_loss(world: &World, things: &Things, a: Pos, b: Pos) -> f32 {
     let (dx, dy, dz) = ((b.x - a.x) as f32, (b.y - a.y) as f32, (b.z - a.z) as f32);
     let steps = ((dx * dx + dy * dy + dz * dz).sqrt() / 0.4).ceil() as i32;
     let (mut sum, mut last) = (0.0, a);
-    for s in 1..steps {
+    for s in 1..=steps {
         let t = s as f32 / steps as f32;
         let c = Pos::new(a.x + (dx * t).round() as i32, a.y + (dy * t).round() as i32, a.z + (dz * t).round() as i32);
-        if c == a || c == b || c == last {
+        if c == a || c == last {
             continue;
         }
+        if c.z != last.z {
+            let upper = if c.z > last.z { c } else { last };
+            if let Some(u) = world.index(upper) {
+                let tile = world.tile[u];
+                if !tile.is_wall() && tile.seals_below() {
+                    sum += slab_loss(world.mats.get(world.mat[u]));
+                }
+            }
+        }
         last = c;
+        if c == b {
+            break;
+        }
         let Some(i) = world.index(c) else { continue };
         if world.tile[i].is_wall() {
             sum += world.mats.get(world.mat[i]).sound_loss;
@@ -158,7 +213,7 @@ pub fn wall_loss(world: &World, things: &Things, a: Pos, b: Pos) -> f32 {
             return MAX_WALL_LOSS;
         }
     }
-    sum
+    sum.min(MAX_WALL_LOSS)
 }
 
 /// Everything a sound loses from `a` to `b`: spreading, air, and walls.
@@ -193,8 +248,10 @@ pub fn hear(world: &World, things: &Things, router: &mut Router, sounds: &[Sound
         let mut got = open_air - walls;
         let mut from = (s.pos.x - at.x, s.pos.y - at.y, s.pos.z - at.z);
         // Only a blocked line is worth a search; a clear one never runs it.
+        // A route costing more than `s.db - need` could not be heard anyway,
+        // so the search stops there (most footsteps die within a few cells).
         if walls > 0.0 {
-            if let Some(route) = router.route(world, things, s.pos, at) {
+            if let Some(route) = router.route_within(world, things, s.pos, at, (s.db - need) as u32) {
                 // A detour is never louder than open air over the straight distance.
                 let detour = s.db - (route.cost as f32).max(spread_loss(r));
                 if detour > got {
@@ -232,8 +289,14 @@ pub struct Route {
     pub via: Pos,
 }
 
-/// The round-the-corner search (Dijkstra) and its scratch memory. Keep one and
-/// reuse it: nothing is allocated per search.
+/// The round-the-corner search and its scratch memory. Keep one and reuse
+/// it: nothing is allocated per search.
+///
+/// It is A* (Dijkstra steered toward the listener): every cell costs at least
+/// 1 dB, so a way from cell `p` can never lose less than the number of cells
+/// still to go (the Manhattan distance). Ways that could not end under the
+/// `limit` are dropped early, and the first time the listener's cell comes
+/// off the heap its way is the least loss.
 #[derive(Debug)]
 pub struct Router {
     /// How many searches have run (a sound with a clear line never runs one).
@@ -245,6 +308,10 @@ pub struct Router {
     // nothing needs clearing between searches: bumping `gen` forgets it all.
     stamp: Vec<u32>,
     settled: Vec<u32>,
+    /// Per cell, whether sound passes it (0 no, 1 yes, 2 an open door), valid
+    /// where `seen[c] == gen`: each cell's things are looked up only once.
+    open: Vec<u8>,
+    seen: Vec<u32>,
     gen: u32,
 }
 
@@ -257,6 +324,8 @@ impl Default for Router {
             prev: vec![0; STATES],
             stamp: vec![0; STATES],
             settled: vec![0; SIDE * SIDE],
+            open: vec![0; SIDE * SIDE],
+            seen: vec![0; SIDE * SIDE],
             gen: 0,
         }
     }
@@ -291,6 +360,11 @@ impl Router {
     /// 6 dB per change of direction), settling at most [`ROUTE_BUDGET`] cells
     /// within [`ROUTE_RADIUS`] of `from`. `None` if there is no such way.
     pub fn route(&mut self, world: &World, things: &Things, from: Pos, to: Pos) -> Option<Route> {
+        self.route_within(world, things, from, to, u32::MAX)
+    }
+
+    /// [`Router::route`], giving up on any way that loses more than `limit` dB.
+    pub fn route_within(&mut self, world: &World, things: &Things, from: Pos, to: Pos, limit: u32) -> Option<Route> {
         if from.z != to.z || (to.x - from.x).abs() > ROUTE_RADIUS || (to.y - from.y).abs() > ROUTE_RADIUS {
             return None;
         }
@@ -299,6 +373,7 @@ impl Router {
         if self.gen == 0 {
             self.stamp.fill(0);
             self.settled.fill(0);
+            self.seen.fill(0);
             self.gen = 1;
         }
         let gen = self.gen;
@@ -307,6 +382,8 @@ impl Router {
         let cell_of = |p: Pos| ((p.y - from.y + ROUTE_RADIUS) as usize) * SIDE + (p.x - from.x + ROUTE_RADIUS) as usize;
         let pos_of = |c: usize| Pos::new(from.x + (c % SIDE) as i32 - ROUTE_RADIUS, from.y + (c / SIDE) as i32 - ROUTE_RADIUS, from.z);
         let goal = cell_of(to);
+        // The least any way from `p` to the listener can lose.
+        let left = |p: Pos| ((to.x - p.x).abs() + (to.y - p.y).abs()) as u32 * ROUTE_CELL;
 
         self.heap.clear();
         let start = cell_of(from) * HEADINGS + 4;
@@ -314,15 +391,18 @@ impl Router {
         self.prev[start] = u32::MAX;
         self.stamp[start] = gen;
         // `Reverse` turns Rust's biggest-first heap into a smallest-first one.
-        self.heap.push(Reverse((0, start as u32)));
+        // Ordered by loss so far plus the least still to come.
+        self.heap.push(Reverse((left(from), start as u32)));
         let mut settled = 0;
         let mut found = None;
-        while let Some(Reverse((d, st))) = self.heap.pop() {
+        while let Some(Reverse((f, st))) = self.heap.pop() {
             let st = st as usize;
-            if d > self.dist[st] {
+            let (cell, heading) = (st / HEADINGS, st % HEADINGS);
+            let p = pos_of(cell);
+            let d = self.dist[st];
+            if f > d + left(p) {
                 continue; // stale: a cheaper way here was found after this was queued
             }
-            let (cell, heading) = (st / HEADINGS, st % HEADINGS);
             if cell == goal {
                 found = Some(st);
                 break;
@@ -334,23 +414,35 @@ impl Router {
                     break;
                 }
             }
-            let p = pos_of(cell);
             for (h, (dx, dy)) in STEPS.iter().enumerate() {
                 let q = Pos::new(p.x + dx, p.y + dy, p.z);
                 if (q.x - from.x).abs() > ROUTE_RADIUS || (q.y - from.y).abs() > ROUTE_RADIUS {
                     continue;
                 }
-                if open_cell(world, things, q).is_none() {
-                    continue;
-                }
                 let turn = if heading < 4 && heading != h { ROUTE_TURN } else { 0 };
                 let nd = d + ROUTE_CELL + turn;
-                let ns = cell_of(q) * HEADINGS + h;
+                let nf = nd.saturating_add(left(q));
+                if nf > limit {
+                    continue;
+                }
+                let qc = cell_of(q);
+                if self.seen[qc] != gen {
+                    self.seen[qc] = gen;
+                    self.open[qc] = match open_cell(world, things, q) {
+                        None => 0,
+                        Some(false) => 1,
+                        Some(true) => 2,
+                    };
+                }
+                if self.open[qc] == 0 {
+                    continue;
+                }
+                let ns = qc * HEADINGS + h;
                 if self.stamp[ns] != gen || nd < self.dist[ns] {
                     self.stamp[ns] = gen;
                     self.dist[ns] = nd;
                     self.prev[ns] = st as u32;
-                    self.heap.push(Reverse((nd, ns as u32)));
+                    self.heap.push(Reverse((nf, ns as u32)));
                 }
             }
         }
@@ -435,24 +527,38 @@ impl Noise {
         for &c in &self.chunks {
             let (x0, y0, x1, y1, z) = world.wake.bounds(c);
             let col = ((y0 / CHUNK) * cw + x0 / CHUNK) as usize;
+            let (mut flux, mut fires) = (0.0, 0);
             for y in y0..y1 {
-                for x in x0..x1 {
-                    let i = world.idx(x, y, z);
-                    if world.fluid[i] > 0 {
-                        self.flux[col] += world.flow_x[i].hypot(world.flow_y[i]);
+                // One row of the chunk as slices: `zip` walks them together
+                // with no bounds check per cell, which is what makes this quick.
+                let r = world.idx(x0, y, z)..world.idx(x1, y, z);
+                let cells = world.fluid[r.clone()].iter().zip(&world.fire[r.clone()]).zip(world.flow_x[r.clone()].iter().zip(&world.flow_y[r]));
+                for ((&fluid, &fire), (&fx, &fy)) in cells {
+                    if fluid > 0 {
+                        // (`hypot` guards against overflow and is several
+                        // times slower; flows are small, so plain sqrt.)
+                        flux += (fx * fx + fy * fy).sqrt();
                     }
-                    if world.fire[i] > 0 {
-                        self.fires[col] += 1;
-                    }
+                    fires += (fire > 0) as u32;
                 }
             }
+            self.flux[col] += flux;
+            self.fires[col] += fires;
         }
         let rain = RAIN_LIFT * world.rain.clamp(0.0, 1.0);
         let wind = WIND_LIFT * (wind_ms / WIND_FULL).clamp(0.0, 1.0);
+        // The weather is the same everywhere: work it out once, and only do
+        // the sums again for columns with water or fire in them.
+        let (open, sheltered) = (combine(&[rain, wind]), combine(&[rain - SHELTER, wind - SHELTER]));
         for col in 0..n {
+            let f = self.fires[col];
+            if self.flux[col] == 0.0 && f == 0 {
+                self.open[col] = open;
+                self.sheltered[col] = sheltered;
+                continue;
+            }
             // One cell moving a full cell of water per tick lifts it ~9.5 dB.
             let water = (10.0 * (1.0 + self.flux[col] / 8.0).log10()).min(WATER_LIFT);
-            let f = self.fires[col];
             let fire = if f == 0 { 0.0 } else { (10.0 + 10.0 * (f as f32).log10()).min(FIRE_LIFT) };
             self.open[col] = combine(&[rain, wind, water, fire]);
             self.sheltered[col] = combine(&[rain - SHELTER, wind - SHELTER, water, fire]);

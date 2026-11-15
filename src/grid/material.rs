@@ -88,6 +88,9 @@ pub struct Material {
     pub evaporate: f32,
     /// Decibels a sound loses passing through a 1 m wall of it (see `sound`).
     pub sound_loss: f32,
+    /// dB added to a footstep on a floor of it: soft sand and snow -10,
+    /// grass -6, stone 0 (the default), wood +6 (see `sound::footstep_db`).
+    pub footfall: f32,
 }
 
 impl Default for Material {
@@ -116,6 +119,7 @@ impl Default for Material {
             strength: 50.0,
             evaporate: 0.0,
             sound_loss: 40.0,
+            footfall: 0.0,
         }
     }
 }
@@ -210,7 +214,9 @@ impl Materials {
     /// chalk; ground cover snow, mud, clay, gravel.
     ///
     /// Sound through a 1 m wall: air 0, leaves 3, wood 22, glass 25, ice 30,
-    /// stone and rock 50; soil and other ground (the default) 40.
+    /// stone and rock 50; soil and other ground (the default) 40. Footsteps:
+    /// sand and snow -10, grass, ash and mud -6, soil and leaves -4, gravel +3,
+    /// wood +6, the rest 0.
     pub fn standard() -> Materials {
         let mut m = Materials::new();
         let solid = |name: &str, fg: Rgb, bg: Rgb, wall: char, floors: &[char]| Material {
@@ -255,18 +261,21 @@ impl Materials {
             conduct: 0.025,
             heat_cap: 1.8,
             strength: 60.0,
+            footfall: -4.0,
             ..solid("soil", Rgb(128, 92, 58), Rgb(54, 38, 24), '▒', &['.', ',', '·', '.'])
         });
         m.add(Material {
             conduct: 0.025,
             heat_cap: 1.6,
             strength: 30.0,
+            footfall: -10.0,
             ..solid("sand", Rgb(196, 180, 128), Rgb(84, 74, 46), '▒', &['.', '·', ',', '.'])
         });
         let ash = m.add(Material {
             conduct: 0.02,
             heat_cap: 1.2,
             strength: 10.0,
+            footfall: -6.0,
             ..solid("ash", Rgb(105, 100, 96), Rgb(34, 32, 30), '▒', &[',', '.', '·', '\''])
         });
         m.add(Material {
@@ -278,6 +287,7 @@ impl Materials {
             conduct: 0.025,
             heat_cap: 1.5,
             strength: 20.0,
+            footfall: -6.0,
             ..solid("grass", Rgb(84, 150, 58), Rgb(26, 46, 18), '"', &[',', '.', '\'', '"', '`', ',', '.'])
         });
         m.add(Material {
@@ -291,6 +301,7 @@ impl Materials {
             heat_cap: 1.6,
             strength: 80.0,
             sound_loss: 22.0,
+            footfall: 6.0,
             ..solid("wood", Rgb(168, 118, 66), Rgb(62, 40, 22), 'O', &['+'])
         });
         m.add(Material {
@@ -303,6 +314,7 @@ impl Materials {
             heat_cap: 1.2,
             strength: 5.0,
             sound_loss: 3.0,
+            footfall: -4.0,
             ..solid("leaves", Rgb(60, 134, 48), Rgb(18, 44, 16), '♣', &['♣'])
         });
         m.add(Material {
@@ -338,10 +350,10 @@ impl Materials {
             m.add(Material { conduct: 0.03, heat_cap: 2.1, strength, sound_loss: 50.0, ..solid(name, fg, bg, '▓', &['.', '·', ',', '.']) });
         }
         // Ground cover.
-        m.add(Material { conduct: 0.02, heat_cap: 2.0, strength: 10.0, ..solid("snow", Rgb(236, 240, 250), Rgb(150, 160, 180), '▒', &['.', '·', '\'', '.']) });
-        m.add(Material { conduct: 0.03, heat_cap: 2.5, strength: 15.0, ..solid("mud", Rgb(110, 84, 56), Rgb(48, 34, 22), '▒', &['~', ',', '.', ',']) });
+        m.add(Material { conduct: 0.02, heat_cap: 2.0, strength: 10.0, footfall: -10.0, ..solid("snow", Rgb(236, 240, 250), Rgb(150, 160, 180), '▒', &['.', '·', '\'', '.']) });
+        m.add(Material { conduct: 0.03, heat_cap: 2.5, strength: 15.0, footfall: -6.0, ..solid("mud", Rgb(110, 84, 56), Rgb(48, 34, 22), '▒', &['~', ',', '.', ',']) });
         m.add(Material { conduct: 0.03, heat_cap: 2.0, strength: 40.0, ..solid("clay", Rgb(170, 100, 70), Rgb(78, 44, 30), '▒', &['.', ',', '·']) });
-        m.add(Material { conduct: 0.03, heat_cap: 1.8, strength: 30.0, ..solid("gravel", Rgb(150, 146, 140), Rgb(60, 58, 56), '▒', &[':', '·', '.', ':']) });
+        m.add(Material { conduct: 0.03, heat_cap: 1.8, strength: 30.0, footfall: 3.0, ..solid("gravel", Rgb(150, 146, 140), Rgb(60, 58, 56), '▒', &[':', '·', '.', ':']) });
         let ice = m.add(Material {
             transparent: true,
             conduct: 0.06,

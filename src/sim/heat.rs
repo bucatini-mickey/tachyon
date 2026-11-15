@@ -315,6 +315,12 @@ fn burn(w: &mut World, i: usize, x: i32, y: i32, z: i32, layer: usize, rng: &mut
 fn burn_out(w: &mut World, i: usize, z: i32, layer: usize) {
     let rest = w.mats.get(w.mat[i]).burns_to;
     let ground_below = z > 0 && w.tile[i - layer].is_wall();
+    // A wall falling in, or a floor dropping into the space below, is heard;
+    // grass burning down to ash on the ground is not.
+    if w.tile[i].is_wall() || !ground_below {
+        let p = w.pos(i);
+        w.note_crumbled(p);
+    }
     if ground_below && rest != AIR {
         w.tile[i] = Tile::Floor;
         w.mat[i] = rest;

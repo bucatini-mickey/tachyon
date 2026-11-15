@@ -5,9 +5,12 @@
 use crate::clock::{Clock, Span};
 use crate::sim::Sim;
 use crate::geom::Pos;
+use crate::life::mind::Control;
 use crate::life::{Life, LifeEvent};
 use crate::projectile::{BlastReport, Flight, Projectile};
+use crate::world::CHUNK;
 use std::cell::RefCell;
+use std::time::Instant;
 
 use crate::sound::{self, Heard, Noise, Router, Sound, SoundKind};
 use crate::things::{KindId, ThingId, Things};
@@ -45,6 +48,14 @@ pub struct Scene {
     old_sounds: usize,
     /// `World::fires_started` when we last looked, to notice new fires.
     fires_seen: u64,
+    /// Where each creature stood at the end of the last tick, to hear its
+    /// footsteps (it may have been moved by the game in between: the player).
+    last_pos: Vec<(ThingId, Pos)>,
+    /// Microseconds spent on sound in the last tick: the noise floor, making
+    /// the tick's sounds, and every creature listening.
+    pub sound_us: u64,
+    /// The part of `sound_us` spent on the noise floor.
+    pub noise_us: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -67,6 +78,9 @@ impl Scene {
             router: RefCell::new(Router::new()),
             old_sounds: 0,
             fires_seen,
+            last_pos: Vec::new(),
+            sound_us: 0,
+            noise_us: 0,
         }
     }
 
@@ -86,7 +100,9 @@ impl Scene {
             }
         }
         let (wx, wy) = self.world.wind;
+        let t0 = Instant::now();
         self.noise.update(&self.world, wx.hypot(wy) / self.clock.secs_per_tick as f32);
+        self.noise_us = t0.elapsed().as_micros() as u64;
         crate::sim::flames::step(&self.world, &mut self.things, &mut self.sim.rng, self.clock.secs_per_tick as f32);
         for v in &mut self.vessels {
             v.step(&mut self.world, &mut self.things);
@@ -123,8 +139,99 @@ impl Scene {
             *ttl > 0
         });
         self.life.step(&mut self.world, &mut self.things, &self.clock);
+        let t0 = Instant::now();
+        self.gather_sounds();
+        self.listen();
+        self.sound_us = self.noise_us + t0.elapsed().as_micros() as u64;
         self.clock.advance();
         self.old_sounds = self.sounds.len();
+    }
+
+    /// Turn what happened this tick into sounds: creatures' noises, walls
+    /// giving way, doors opening, and footsteps.
+    fn gather_sounds(&mut self) {
+        // `append` moves everything across and leaves the source empty.
+        self.sounds.append(&mut self.life.sounds);
+        // Walls coming down: one sound per chunk and level, however many.
+        let start = self.sounds.len();
+        for p in std::mem::take(&mut self.world.crumbled) {
+            let near = |s: &Sound| s.pos.z == p.z && s.pos.x / CHUNK == p.x / CHUNK && s.pos.y / CHUNK == p.y / CHUNK;
+            if !self.sounds[start..].iter().any(near) {
+                self.sounds.push(Sound::new(p, sound::level::COLLAPSE, SoundKind::Collapse));
+            }
+        }
+        for p in self.things.doors_opened.drain(..) {
+            self.sounds.push(Sound::new(p, sound::level::DOOR, SoundKind::Door));
+        }
+        self.footsteps();
+    }
+
+    /// A footstep for every creature that moved to a new cell since the last
+    /// tick, if someone is near enough to hear it.
+    fn footsteps(&mut self) {
+        let Scene { world, things, life, sounds, last_pos, .. } = self;
+        let now = |id: ThingId| things.get(id).map(|t| t.pos());
+        // Listeners: anyone awake or asleep, not knocked out or dead.
+        let listening = |c: &crate::life::Creature| c.alive && !c.out;
+        if last_pos.len() == life.creatures.len() {
+            for (k, c) in life.creatures.iter().enumerate() {
+                let (id, was) = last_pos[k];
+                let Some(p) = now(c.thing) else { continue };
+                // A step is a change of cell sideways; a fall is straight down.
+                if id != c.thing || !c.alive || (p.x == was.x && p.y == was.y) {
+                    continue;
+                }
+                let Some(i) = world.index(p) else { continue };
+                // Swimming makes no footsteps; nor does riding a deck, which
+                // moves everyone aboard each tick (and a ship creaks louder).
+                if world.fluid[i] >= crate::movement::SWIM_DEPTH || things.deck_at(p) {
+                    continue;
+                }
+                let footfall = if world.tile[i].has_floor() {
+                    world.mats.get(world.mat[i]).footfall
+                } else if p.z > 0 {
+                    world.mats.get(world.mat[i - world.layer()]).footfall
+                } else {
+                    0.0
+                };
+                let sp = life.species_of(c);
+                let db = sound::footstep_db(sp.mass, footfall);
+                let heard_by = |o: &crate::life::Creature| {
+                    let Some(q) = now(o.thing) else { return false };
+                    let (dx, dy, dz) = ((q.x - p.x) as f32, (q.y - p.y) as f32, (q.z - p.z) as f32);
+                    let r = sound::reach(db, life.species_of(o).hearing);
+                    dx * dx + dy * dy + dz * dz <= r * r
+                };
+                if life.creatures.iter().any(|o| o.thing != c.thing && listening(o) && heard_by(o)) {
+                    sounds.push(Sound { source: Some(c.thing), ..Sound::new(p, db, SoundKind::Footstep) });
+                }
+            }
+        }
+        last_pos.clear();
+        last_pos.extend(life.creatures.iter().map(|c| (c.thing, now(c.thing).unwrap_or_default())));
+    }
+
+    /// Every creature with a mind hears this tick's sounds and reacts.
+    fn listen(&mut self) {
+        if self.sounds.is_empty() {
+            return;
+        }
+        let Scene { world, things, life, sounds, noise, router, clock, .. } = self;
+        // `get_mut` borrows the scratch memory without the run-time check:
+        // with `&mut self` the compiler already knows nobody else has it.
+        let router = router.get_mut();
+        for i in 0..life.creatures.len() {
+            let c = &life.creatures[i];
+            if !c.alive || c.out || c.mind.control != Control::Ai {
+                continue;
+            }
+            let Some(pos) = things.get(c.thing).map(|t| t.pos()) else { continue };
+            let hearing = life.species_of(c).hearing;
+            let heard = sound::hear(world, things, router, sounds, pos, noise.floor(world, pos), hearing);
+            if !heard.is_empty() {
+                crate::life::ai::react(life, i, world, things, sounds, &heard, pos, clock);
+            }
+        }
     }
 
     /// What a listener at `at` hears of `self.sounds`. `hearing_db` is how far

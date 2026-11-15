@@ -190,7 +190,14 @@ pub struct World {
     pub fires_started: u64,
     /// Where the latest new fire started.
     pub last_fire_start: Option<Pos>,
+    /// Walls and floors that gave way since the scene last looked (burnt
+    /// out, or broken by a blast), for the sound of it. `Scene::tick` empties
+    /// it; without a scene it stops filling at [`CRUMBLED_MAX`].
+    pub crumbled: Vec<Pos>,
 }
+
+/// Most entries `World::crumbled` keeps before anyone empties it.
+pub const CRUMBLED_MAX: usize = 64;
 
 impl World {
     /// An empty world of open air at 15 C.
@@ -222,6 +229,14 @@ impl World {
             wake: Wake::new(w, h, d),
             fires_started: 0,
             last_fire_start: None,
+            crumbled: Vec::new(),
+        }
+    }
+
+    /// Note that the wall or floor at `p` gave way (see `crumbled`).
+    pub fn note_crumbled(&mut self, p: Pos) {
+        if self.crumbled.len() < CRUMBLED_MAX {
+            self.crumbled.push(p);
         }
     }
 

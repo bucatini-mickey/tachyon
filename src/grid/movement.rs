@@ -40,6 +40,9 @@ pub fn step(world: &World, things: &mut Things, who: ThingId, dx: i32, dy: i32) 
             if let Some(d) = things.get_mut(door) {
                 d.open = true;
             }
+            if things.doors_opened.len() < 64 {
+                things.doors_opened.push(to);
+            }
             return Step::OpenedDoor(door);
         }
     }

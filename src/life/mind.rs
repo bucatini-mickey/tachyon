@@ -91,6 +91,8 @@ pub enum Goal {
     Flee(ThingId),
     /// Get out of fire or smoke.
     Escape,
+    /// Go a few steps toward a noise (a scream, a blast) to see what it was.
+    Look(Pos),
 }
 
 #[derive(Clone, Debug)]
@@ -120,6 +122,9 @@ pub struct Mind {
     /// Don't search for food or water again before this tick (none was found).
     pub no_food_until: u64,
     pub no_water_until: u64,
+    /// Where it last heard something alarming (a scream, a blast) seem to
+    /// come from: it turned to face that way.
+    pub heard: Option<Pos>,
 }
 
 impl Mind {
@@ -141,6 +146,7 @@ impl Mind {
             stuck: 0,
             no_food_until: 0,
             no_water_until: 0,
+            heard: None,
         }
     }
 

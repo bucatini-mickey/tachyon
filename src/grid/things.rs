@@ -209,6 +209,10 @@ pub struct Things {
     free: Vec<u32>,
     at: HashMap<Pos, Vec<u32>>,
     count: usize,
+    /// Doors opened by walking into them since the scene last looked, for
+    /// the sound of it. `Scene::tick` empties it; without a scene it stops
+    /// filling at 64.
+    pub doors_opened: Vec<Pos>,
 }
 
 impl Things {
