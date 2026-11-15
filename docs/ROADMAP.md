@@ -204,7 +204,9 @@ Each block: **Exists** (file, function), **Sound** (conservation, stability, cos
   karst caves in limestone below the water table (M after R2). G-3 streaming the bubble with saved diffs (L, R3).
 
 ### 4.9 River generation by erosion
-- **Exists:** authored river polylines; carving in `worldgen`. No flow routing, no erosion.
+- **Exists:** authored river polylines; carving in `worldgen`. `make/hydro.rs`: R-a flow routing (tach-020) and R-b
+  stream-power erosion on an 8 m `atlas::Relief` (tach-021; editor key E writes `<name>-eroded.atlas`). Fluvial
+  deposition only in lakes; no uplift by default; drawn rivers are not yet pinned during erosion.
 - **What it needs from the layout:** a 2D heightfield over the whole map with flow direction, drainage area and
   discharge per cell (the region layer), and a finer relief than 32 m for valleys to have a shape. It does **not** need
   the 1 m grid: erosion happens at world-making time on the 2D field; the 1 m world only carves the result.

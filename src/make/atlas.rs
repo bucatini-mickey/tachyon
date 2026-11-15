@@ -47,6 +47,57 @@ impl Feature {
     }
 }
 
+/// A finer height layer over the whole map: `scale` x `scale` relief cells per
+/// atlas cell (4 gives 8 m cells). Made by erosion ([`crate::hydro::erode`]);
+/// when an atlas has one, [`Atlas::elevation_at`] (and so worldgen) reads it
+/// instead of the coarse `elevation`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Relief {
+    pub scale: i32,
+    /// Size in relief cells (atlas size x `scale`).
+    pub w: i32,
+    pub h: i32,
+    /// Metres above sea level, row by row.
+    pub height: Vec<f32>,
+}
+
+impl Relief {
+    pub fn new(scale: i32, w: i32, h: i32, fill: f32) -> Relief {
+        Relief { scale, w, h, height: vec![fill; (w * h) as usize] }
+    }
+    /// Metres per relief cell edge.
+    pub fn cell_m(&self) -> f32 {
+        REGION as f32 / self.scale as f32
+    }
+    #[inline]
+    pub fn idx(&self, x: i32, y: i32) -> usize {
+        (y * self.w + x) as usize
+    }
+    /// Height of a cell, clamped to the map edge.
+    pub fn at(&self, x: i32, y: i32) -> f32 {
+        self.height[self.idx(x.clamp(0, self.w - 1), y.clamp(0, self.h - 1))]
+    }
+    /// Smooth height at a point given in *atlas* units, like `Atlas::elevation_at`.
+    pub fn sample(&self, x: f32, y: f32) -> f32 {
+        let s = self.scale as f32;
+        catmull_rom(|i, j| self.at(i, j), x * s - 0.5, y * s - 0.5)
+    }
+}
+
+/// Cubic (Catmull-Rom) interpolation of a grid at (gx, gy), where integer
+/// coordinates are cell centres. Overshoot is clamped to the four nearest cells.
+fn catmull_rom(get: impl Fn(i32, i32) -> f32, gx: f32, gy: f32) -> f32 {
+    let (ix, iy) = (gx.floor() as i32, gy.floor() as i32);
+    let (fx, fy) = (gx - ix as f32, gy - iy as f32);
+    let cubic = |p0: f32, p1: f32, p2: f32, p3: f32, t: f32| {
+        p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)))
+    };
+    let row = |j: i32| cubic(get(ix - 1, iy + j), get(ix, iy + j), get(ix + 1, iy + j), get(ix + 2, iy + j), fx);
+    let v = cubic(row(-1), row(0), row(1), row(2), fy);
+    let c = [get(ix, iy), get(ix + 1, iy), get(ix, iy + 1), get(ix + 1, iy + 1)];
+    v.clamp(c.iter().copied().fold(f32::MAX, f32::min), c.iter().copied().fold(f32::MIN, f32::max))
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Atlas {
     pub name: String,
@@ -64,6 +115,8 @@ pub struct Atlas {
     pub biomes: Vec<String>,
     pub rivers: Vec<River>,
     pub features: Vec<Feature>,
+    /// Finer heights from erosion, if this atlas has been eroded.
+    pub relief: Option<Relief>,
 }
 
 impl Atlas {
@@ -81,6 +134,7 @@ impl Atlas {
             biomes: biomes.iter().map(|s| s.to_string()).collect(),
             rivers: Vec::new(),
             features: Vec::new(),
+            relief: None,
         }
     }
 
@@ -102,22 +156,13 @@ impl Atlas {
 
     /// Smooth elevation at a point in atlas units, where (0.5, 0.5) is the
     /// centre of cell (0, 0). Cubic (Catmull-Rom) interpolation, so slopes
-    /// are smooth rather than faceted.
+    /// are smooth rather than faceted. An eroded atlas answers from its finer
+    /// `relief` layer instead.
     pub fn elevation_at(&self, x: f32, y: f32) -> f32 {
-        let (gx, gy) = (x - 0.5, y - 0.5);
-        let (ix, iy) = (gx.floor() as i32, gy.floor() as i32);
-        let (fx, fy) = (gx - ix as f32, gy - iy as f32);
-        let cubic = |p0: f32, p1: f32, p2: f32, p3: f32, t: f32| {
-            p1 + 0.5 * t * (p2 - p0 + t * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3 + t * (3.0 * (p1 - p2) + p3 - p0)))
-        };
-        let row = |j: i32| {
-            cubic(self.elev(ix - 1, iy + j), self.elev(ix, iy + j), self.elev(ix + 1, iy + j), self.elev(ix + 2, iy + j), fx)
-        };
-        let v = cubic(row(-1), row(0), row(1), row(2), fy);
-        // Overshoot between very different cells is clamped to the local range.
-        let lo = self.elev(ix, iy).min(self.elev(ix + 1, iy)).min(self.elev(ix, iy + 1)).min(self.elev(ix + 1, iy + 1));
-        let hi = self.elev(ix, iy).max(self.elev(ix + 1, iy)).max(self.elev(ix, iy + 1)).max(self.elev(ix + 1, iy + 1));
-        v.clamp(lo, hi)
+        match &self.relief {
+            Some(r) => r.sample(x, y),
+            None => catmull_rom(|i, j| self.elev(i, j), x - 0.5, y - 0.5),
+        }
     }
 
     /// Cells under a round brush of radius `r` (cells) at (cx, cy), with a
@@ -188,6 +233,15 @@ impl Atlas {
                 s.push('\n');
             }
         }
+        // Relief heights print in Rust's shortest exact form ("12.3", "-4").
+        if let Some(r) = &self.relief {
+            s += &format!("relief {}\n", r.scale);
+            for y in 0..r.h {
+                let row: Vec<String> = (0..r.w).map(|x| r.height[r.idx(x, y)].to_string()).collect();
+                s += &row.join(" ");
+                s.push('\n');
+            }
+        }
         for r in &self.rivers {
             let pts: Vec<String> = r.points.iter().map(|(x, y)| format!("{x},{y}")).collect();
             s += &format!("river {} {}\n", r.width, pts.join(" "));
@@ -253,6 +307,25 @@ impl Atlas {
                             }
                         }
                     }
+                }
+                "relief" => {
+                    let scale = num(rest.trim())?;
+                    if !(1..=REGION).contains(&scale) {
+                        return Err(format!("relief scale {scale} out of range"));
+                    }
+                    let mut r = Relief::new(scale, a.w * scale, a.h * scale, 0.0);
+                    for y in 0..r.h {
+                        let row = lines.next().ok_or("relief ends early")?;
+                        let v: Vec<&str> = row.split_whitespace().collect();
+                        if v.len() != r.w as usize {
+                            return Err(format!("relief row {y} has {} values, expected {}", v.len(), r.w));
+                        }
+                        for (x, s) in v.iter().enumerate() {
+                            let i = r.idx(x as i32, y);
+                            r.height[i] = s.parse::<f32>().map_err(|e| format!("bad height '{s}': {e}"))?;
+                        }
+                    }
+                    a.relief = Some(r);
                 }
                 "river" => {
                     let mut it = rest.split_whitespace();
