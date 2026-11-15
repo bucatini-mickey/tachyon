@@ -446,17 +446,150 @@ Each step ships alone and keeps tests green. Steps 1 to 3 of tach-006 (day lengt
 13. **Networks** (secret factions, reporting, turning, contradiction checks). Small once 5, 7 and 11 exist; it is mostly game data.
 14. **Far tier** (bodiless people ticked daily, travel as jobs, stations). Moderate; with tach-006 step 11.
 
-## 20. Open questions
+## 20. Open questions and your answers (14 Nov)
 
-1. **How many people?** An island of 500, 2 000 or 10 000 named people changes the far-tier budget and whether every person needs a full record (or whether far crowds are just counts per town until the player arrives).
-2. **Persona axes:** are the twelve suggested traits right for you? Should the two god axes be persona traits (my suggestion) or kept separate?
-3. **How much should the player see of minds?** A DF-style "thoughts" panel (why the smith is angry), or only what the NPC says and does?
-4. **The director:** one global drama budget, per region, or none (let it burn)?
-5. **The Allfather:** the restoring term makes "alive and distant" vs "dead" a playable difference. Do you want it to change during the game?
-6. **Gossip speed:** how fast should news travel? Two game days across a town and a week to the next town is my default.
-7. **Line authoring:** are you happy for Claude to draft line banks offline for you to edit, and which registers and cultures matter first?
-8. **Directions and maps:** should NPCs who do not know a place say so, and should the player's own map knowledge come from asking (as in Morrowind's "follow the road north")?
-9. **Prejudice as a mechanic:** stereotype regard between cultures is a modelled force here. How visible should it be, and should the player be able to move it (a town's view of a people changing over the game)?
-10. **Children:** should births and ageing run in real game time (years), or should a game span weeks so children stay children? This decides whether aging needs a calendar year.
-11. **Spy networks and the player:** can the player found their own network (recruit agents, run handlers), or only serve existing ones?
-12. **Which comes first after tach-006:** stimuli and reactions (towns feel alive soonest), or people and facts (reputation and spies soonest)?
+Each question is kept as asked. **Your answer** is your 14 Nov reply (`Queue/projects/tachyon.md`, tach-007), in your words. Everything under **Claude, 15 Nov** is my addition: what the answer changes in sections 1 to 19, or a plainer version of the question. Sections 1 to 19 are not rewritten yet; where one disagrees with an answer here, the answer wins.
+
+Where things stand: 1, 3, 5 to 11 answered; 2 open (details below for later); 4 reworded and open; 12 decided by Claude.
+
+### 20.1 How many people? (answered)
+
+An island of 500, 2 000 or 10 000 named people changes the far-tier budget and whether every person needs a full record (or whether far crowds are just counts per town until the player arrives).
+
+**Your answer:** Engine must be able to simulate a continent with tapering depth: full detail near the player's side, only the highest level far away. Broad patterns as simple attributes (volcano erupts, towns flee, immigration, unrest, news travels slowly), not micro-actions for most of the world.
+
+**Claude, 15 Nov: what changes.**
+- No head count to fix. The tiers in section 16 taper, matching `docs/SIM_LOD.md` (no level is ever off): near people are full `Person`s with bodies; further out, `Person`s with no body, ticked daily; furthest out, no individuals at all.
+- The furthest level is a settlement record: population, mood or unrest, food, faith mix, people leaving and arriving. A volcano erupting is a change to those numbers: the town empties into its neighbours (immigration there, unrest from crowding), and the news starts from that node (`NEWS_AND_REPUTATION.md`, tach-025).
+- When the player comes near, a settlement's counts become named people, seeded from (world seed, settlement, index), so the same town comes back the same. Going away folds them back into counts, keeping as people only those the player has met or who hold facts about the player.
+
+### 20.2 Persona axes (open: you have not looked yet)
+
+Are the twelve suggested traits right for you? Should the two god axes be persona traits (my suggestion) or kept separate?
+
+**Your answer:** Not looked at yet; keep open and provide the details to look at later.
+
+**Claude, 15 Nov: details for when you look.** In one line: are these the right personality sliders, and should the gods' two axes be two more of them? Each trait runs -100..100 (section 5).
+
+| Trait | High means | Low means | Read by |
+|---|---|---|---|
+| piety | devout | godless | devotion drive (12), conversion (13.3) |
+| greed | grasping | content | aims (11), bribes (15.6) |
+| honesty | truthful | deceitful | schemes (11), lying, stealing when hungry (8) |
+| sociability | seeks company | keeps to self | company drive (12), gossip rate (9.2) |
+| curiosity | goes to look | minds own business | reactions (6.2) |
+| ambition | wants more | content with their lot | taking up aims (11) |
+| cruelty | enjoys harm | gentle | foul schemes (11) |
+| humour | jokes | grave | lines (15) |
+| patience | waits, long schemes | acts now | schemes (11) |
+| pride | takes insults hard | thick-skinned | regard rules (9.1) |
+| lust | courtship, affairs | cool | life events (11) |
+| nerve | stands their ground | flees | reactions (6.2), `urgent()` |
+
+The god axes, two ways:
+- **A. As traits 13 and 14** (`calm..passion`, `mercy..judgement`). One number drives both a person's temper and which god sways them, so a passion-heavy district makes people quarrel through the same number. Cost: faith and temper cannot be set apart.
+- **B. Separate**, as a pair inside `Faith` (13.1). A calm person can be drawn to the passionate god. Cost: the influence fields (13.2) then need their own link to behaviour.
+
+Overlaps worth a look: `nerve` against the species' `courage` (5); `patience` against `calm..passion`; `cruelty` against `mercy..judgement`.
+
+What I need back: keep, cut or rename each trait; any to add for your cultures; A or B.
+
+### 20.3 How much should the player see of minds? (answered)
+
+A DF-style "thoughts" panel (why the smith is angry), or only what the NPC says and does?
+
+**Your answer:** Most games: no seeing into minds, you control one player and see from their point of view. Games like Torpor may have mind-reading spells, so provide a function for presenting inner thoughts, but generally no detailed view of minds.
+
+**Claude, 15 Nov: what changes.**
+- No thoughts panel. The player learns about minds from what NPCs say and do.
+- The engine offers one function, `Person::thoughts() -> Vec<Thought>`: a short list of current reasons (what they are doing and why, their strongest mood, how they feel about the people near them, the fact on their mind). Each one becomes a sentence through the line bank (concept `thought:<kind>`, section 15). A game with a mind-reading spell (Torpor) calls it; the others do not.
+
+### 20.4 The director (open, reworded)
+
+Asked as: one global drama budget, per region, or none (let it burn)?
+
+**Your answer:** User not sure what the question means; rephrase it more plainly.
+
+**Claude, 15 Nov: the question, plainly.** NPCs follow their ambitions (section 11), so now and then one murders a rival, elopes, gets arrested or burns a house down. Left alone, a town full of ambitious, cruel people could have a murder every night and be half empty in a month. Should the game cap how many of these big events can happen?
+- **(a) One cap for the whole world**, for example at most 10 a game week anywhere.
+- **(b) A cap per place that you set**: a quiet farming valley gets one a month, the conquistador port several a week. (My suggestion.)
+- **(c) No cap**: whatever people's ambitions produce happens, even if a town tears itself apart.
+
+With a cap, nothing is cancelled: once the week's budget is spent, schemes pick their gentler steps or wait. With a one-year game (20.10), (c) could empty a town well before the year ends.
+
+### 20.5 The Allfather (answered)
+
+The restoring term makes "alive and distant" vs "dead" a playable difference. Do you want it to change during the game?
+
+**Your answer:** The All-father is presumed alive but distant; no change in game.
+
+**Claude, 15 Nov: what changes.** The restoring term in 13.2 is a fixed weak pull for the whole game. There is no "dead" state to build: the balance can slip a long way, but always drifts back slowly. The test in 19 step 12 checks only the alive case.
+
+### 20.6 Gossip speed (answered)
+
+How fast should news travel? Two game days across a town and a week to the next town is my default.
+
+**Your answer:** Already addressed: model as a population-density-sensitive energy-like system that dissipates and distorts slightly over distance.
+
+**Claude, 15 Nov: what changes.** The fixed default is dropped. Speed comes from population density, as in `NEWS_AND_REPUTATION.md` (tach-025): fast through a crowded town, slow across empty country, fading with distance and age, and losing or gaining small details with each retelling. Gossip between people (9.2) still carries news round the town near the player, but each retelling now multiplies confidence by 0.92 (tach-025 section 7), not the 0.8 in 9.2.
+
+### 20.7 Line authoring (answered)
+
+Are you happy for Claude to draft line banks offline for you to edit, and which registers and cultures matter first?
+
+**Your answer:** Draft some placeholder content, not too much; the user wants to write most of it.
+
+**Claude, 15 Nov: what changes.**
+- Claude drafts only a thin placeholder bank: one fallback line per concept (no criteria, `plain` register), so the game can always say something. That is about 150 short lines, not the 7 000 in 15.5.
+- Every placeholder line carries `# placeholder`, and `dialogue --lint` lists the ones you have not replaced yet. You write the real lines, the registers and the voices.
+- Not answered yet: which registers and cultures matter first. Until you say, placeholders are `plain` only.
+
+### 20.8 Directions and maps (answered)
+
+Should NPCs who do not know a place say so, and should the player's own map knowledge come from asking (as in Morrowind's "follow the road north")?
+
+**Your answer:** Replicate Morrowind: NPCs know the local area, perhaps have a map of sorts, and relations with other NPCs, and act accordingly.
+
+**Claude, 15 Nov: what changes.**
+- "Knowing the way" (7.5) is on by default, not optional. Each NPC knows their local area: their settlement and what surrounds it, their trade's places, roads they have travelled.
+- Some NPCs own a map: a thing that holds place facts, like a letter (9.2). Reading it teaches the places.
+- Asked about a place they do not know, an NPC says so, or sends you to someone they know who would (their ties, 9.1).
+- I have read "replicate Morrowind" as yes to the second part too: the player's map grows from asking and from maps.
+
+### 20.9 Prejudice as a mechanic (answered)
+
+Stereotype regard between cultures is a modelled force here. How visible should it be, and should the player be able to move it (a town's view of a people changing over the game)?
+
+**Your answer:** Modelled and visible. On the larger scale there is a history of wars and conflicts. Views of individuals can change; views coalesce like a heat model.
+
+**Claude, 15 Nov: what changes.**
+- Each settlement holds a view of each people (9.1's stereotype regard). It starts from an authored history: wars and conflicts entered as facts dated before day 0.
+- Visible through what NPCs say and do (stance, lines, who serves whom, who is turned away), not a panel, in keeping with 20.3.
+- A person's own view moves with deeds and ties. A settlement's views average out within it and spread to neighbours like heat, and opposed groups push apart: the collective-belief model in tach-025 section 6. So the player can move a town's view, slowly.
+
+### 20.10 Children (answered)
+
+Should births and ageing run in real game time (years), or should a game span weeks so children stay children? This decides whether aging needs a calendar year.
+
+**Your answer:** One game year, frozen in time. Weather changes; map large or diverse enough to show all seasons.
+
+**Claude, 15 Nov: what changes.**
+- How I have read it: a game lasts at most one game year; nobody ages and the season does not turn; weather still changes day to day; the map is large or varied enough to have every season somewhere at once.
+- No ageing and no calendar of years. Children stay children, with fixed child routines (8).
+- The "birth" life event in section 11 is off by default.
+
+### 20.11 Spy networks and the player (answered)
+
+Can the player found their own network (recruit agents, run handlers), or only serve existing ones?
+
+**Your answer:** Yes, they can form their own network.
+
+**Claude, 15 Nov: what changes.** A player's network is a secret faction (section 14) with the player at its head. Recruiting is a dialogue check that adds a `handler`/`agent` tie between recruiter and recruit. The player gives agents tasks from the same list NPC spymasters use (watch, follow, befriend, steal a letter, plant a lie). The same rules apply both ways: rival networks can turn the player's agents, and contradiction checks catch an agent who lies to the player. It goes after 19 step 13.
+
+### 20.12 Which comes first after tach-006 (decided)
+
+Stimuli and reactions (towns feel alive soonest), or people and facts (reputation and spies soonest)?
+
+**Your answer:** Left to Claude.
+
+**Decided by Claude, 15 Nov:** stimuli and reactions first (19 steps 1 to 4 as written), then people and facts. Reason: it is the smaller step that shows towns reacting soonest, and facts are made by witnessing, so people and facts need the stimulus bus first.
