@@ -19,6 +19,7 @@ pub mod body;
 pub mod mind;
 pub mod needs;
 pub mod path;
+pub mod skills;
 pub mod species;
 
 use crate::clock::Clock;
@@ -38,6 +39,7 @@ use species::{Attack, Species};
 use std::collections::HashMap;
 
 pub type SpeciesId = u16;
+pub use skills::{SkillDef, SkillId};
 
 #[derive(Clone, Debug)]
 pub struct Creature {
@@ -55,6 +57,9 @@ pub struct Creature {
     pub out: bool,
     /// What its body can do, as of the last step.
     pub caps: Capacities,
+    /// Proficiency 0..1 per registered skill, indexed by `SkillId`; always as
+    /// long as `Life::skills` (see `skills.rs`).
+    pub skills: Vec<f32>,
     /// Levels fallen so far in the current fall.
     falling: i32,
     /// Seconds of exposure to fire since the last burn.
@@ -175,6 +180,8 @@ const FALL_FORCE: f32 = 14.0;
 
 pub struct Life {
     pub species: Vec<Species>,
+    /// Skills the game registered (`add_skill`); the engine ships none.
+    pub skills: Vec<SkillDef>,
     pub creatures: Vec<Creature>,
     index: HashMap<ThingId, usize>,
     pub stains: Stains,
@@ -196,6 +203,7 @@ impl Life {
     pub fn new(seed: u64) -> Life {
         Life {
             species: Vec::new(),
+            skills: Vec::new(),
             creatures: Vec::new(),
             index: HashMap::new(),
             stains: Stains::default(),
@@ -232,6 +240,7 @@ impl Life {
             death: None,
             out: false,
             caps: Capacities::default(),
+            skills: vec![0.0; self.skills.len()],
             falling: 0,
             scorch: 0.0,
         };

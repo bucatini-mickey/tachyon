@@ -16,7 +16,7 @@
 //!            movement vessel scene                moving through it; rafts; the whole ticked together
 //!  sim/      fluid gas heat light flames          physics over awake chunks
 //!            weather projectile sound             wind and rain; things in flight and explosions; sound
-//!  life/     body needs mind ai path species      creatures
+//!  life/     body needs mind ai path species skills  creatures
 //!  sea/      field craft ballistics sight         open water as fields; ships posed on it; shot; long sight
 //!  make/     atlas blueprint hydro worldgen lang library   authored world maps and structures; generated names; Tokamak files
 //!  draw/     frame view ui display                cell pictures of the world and its screens; how they reach the screen
@@ -60,7 +60,7 @@ pub mod prelude {
     pub use crate::life::body::{DamageKind, Does, Tissue};
     pub use crate::life::mind::{Control, Routine, Task};
     pub use crate::life::species::{Attack, Species};
-    pub use crate::life::{Life, LifeEvent, SpeciesId};
+    pub use crate::life::{Life, LifeEvent, SkillDef, SkillId, SpeciesId};
     pub use crate::material::{MatId, MatKind, Material, Materials, WallStyle, AIR};
     pub use crate::movement::{self, Step};
     pub use crate::projectile::{Blast, Projectile};

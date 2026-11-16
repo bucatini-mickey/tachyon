@@ -96,7 +96,7 @@ grid/     material tile world things clock     the grid (structure-of-arrays, 16
           movement vessel scene                walking, stairs, swimming; rafts; the Scene that ticks it all
 sim/      fluid gas heat light flames          physics over awake chunks
           weather projectile                   wind and rain; things in flight and explosions
-life/     body needs mind ai path species      creatures
+life/     body needs mind ai path species skills  creatures
 sea/      field craft ballistics sight         the sea as fields; ships posed on it; round shot; seeing over the horizon
 make/     atlas blueprint worldgen lang        authored world maps and structures; generated languages and names
 draw/     frame view ui display                cell pictures of the world and its screens; ASCII folding and colour schemes
